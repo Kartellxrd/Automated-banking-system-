@@ -1,243 +1,224 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { CreditCard, Wallet, Download, CheckCircle2, Loader2, DollarSign } from 'lucide-react';
 
 export default function PayrollPage() {
-  const [payPeriodId, setPayPeriodId] = useState(null);
+  const [payPeriodId, setPayPeriodId] = useState('');
   const [payrollData, setPayrollData] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [processing, setProcessing] = useState(false);
-  const [isPaid, setIsPaid] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [disbursing, setDisbursing] = useState(false);
+  
+  // Modal & Receipt state
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [disbursementResult, setDisbursementResult] = useState(null);
+  const [errorMsg, setErrorMsg] = useState('');
 
-  const fetchPayroll = async () => {
+  // Fetch initial payroll data
+  useEffect(() => {
+    fetchPayrollSummary();
+  }, []);
+
+  const fetchPayrollSummary = async () => {
+    setLoading(true);
     try {
-      setLoading(true);
       const res = await fetch('/api/hours');
-      const result = await res.json();
-      if (result.success) {
-        setPayPeriodId(result.pay_period_id);
-        
-        const empRes = await fetch('/api/employees');
-        const empResult = await empRes.json();
-        
-        if (empResult.success) {
-          const empMap = new Map();
-          (empResult.data || []).forEach((e) => empMap.set(e.id, e));
-
-          const combined = (result.data || []).map((item) => {
-            const empDetails = empMap.get(item.employee_id);
-            const profile = empDetails?.employee_payout_profiles?.[0];
-            return {
-              ...item,
-              profile,
-              provider: profile?.payout_providers,
-              channel: profile?.payout_providers?.payment_channels?.code
-            };
-          });
-
-          setPayrollData(combined);
-        }
+      const json = await res.json();
+      if (json.success) {
+        setPayPeriodId(json.pay_period_id);
+        setPayrollData(json.data || []);
       }
     } catch (err) {
-      console.error('Failed to load payroll records:', err);
+      console.error('Failed to load payroll summary:', err);
     } finally {
       setLoading(false);
     }
   };
 
-  useEffect(() => {
-    fetchPayroll();
-  }, []);
+  // Trigger the 1-Click Gateway Disbursement
+  const handleDisburseAll = async () => {
+    setDisbursing(true);
+    setErrorMsg('');
+    setDisbursementResult(null);
 
-  const handleDownloadCSV = (type) => {
-    if (!payPeriodId) return;
-    window.location.href = `/api/payroll/export?pay_period_id=${payPeriodId}&type=${type}`;
+    try {
+      const res = await fetch('/api/payroll/disburse', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ pay_period_id: payPeriodId }),
+      });
+
+      const data = await res.json();
+
+      if (!res.ok || !data.success) {
+        throw new Error(data.error || 'Disbursement failed.');
+      }
+
+      setDisbursementResult(data);
+      fetchPayrollSummary(); // Refresh database status on background UI
+    } catch (err) {
+      setErrorMsg(err.message);
+    } finally {
+      setDisbursing(false);
+    }
   };
 
-  const handleFinalizePayroll = () => {
-    setProcessing(true);
-    setTimeout(() => {
-      setProcessing(false);
-      setIsPaid(true);
-    }, 1200);
-  };
-
-  const totalNetPay = payrollData.reduce((sum, item) => sum + (parseFloat(item.gross_pay) || 0), 0);
-  const bankEntries = payrollData.filter((item) => item.channel === 'BANK');
-  const walletEntries = payrollData.filter((item) => item.channel === 'MOBILE_WALLET');
-
-  const bankTotal = bankEntries.reduce((sum, item) => sum + (parseFloat(item.gross_pay) || 0), 0);
-  const walletTotal = walletEntries.reduce((sum, item) => sum + (parseFloat(item.gross_pay) || 0), 0);
+  const calculateTotal = () =>
+    payrollData.reduce((acc, curr) => acc + (parseFloat(curr.gross_pay) || 0), 0);
 
   return (
-    <div className="min-h-screen bg-slate-50 p-4 md:p-8 text-slate-800">
-      <div className="max-w-7xl mx-auto space-y-6">
-        
-        {/* HEADER SECTION */}
-        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 bg-white p-6 rounded-2xl shadow-sm border border-slate-200">
-          <div>
-            <h1 className="text-2xl font-bold tracking-tight text-slate-900">Payroll Disbursement Engine</h1>
-            <p className="text-sm text-slate-500 mt-1">
-              Review final calculated pay and generate payout files for Banks & Mobile Wallets (Orange Money, Smega, MyZaka).
-            </p>
-          </div>
-
+    <div className="max-w-6xl mx-auto space-y-6">
+      {/* Header */}
+      <div className="flex justify-between items-center bg-white p-6 rounded-xl border border-gray-200 shadow-sm">
+        <div>
+          <h1 className="text-2xl font-bold text-gray-900">Payroll Reconciliation & Payouts</h1>
+          <p className="text-sm text-gray-500">
+            Review calculated wages and trigger instant multi-channel disbursements.
+          </p>
+        </div>
+        <div className="flex gap-3">
           <button
-            onClick={handleFinalizePayroll}
-            disabled={processing || isPaid || payrollData.length === 0}
-            className={`w-full sm:w-auto inline-flex items-center justify-center gap-2 font-bold px-6 py-3 rounded-xl transition shadow-sm active:scale-95 ${
-              isPaid
-                ? 'bg-emerald-600 text-white cursor-default'
-                : 'bg-indigo-600 hover:bg-indigo-700 text-white'
-            }`}
+            onClick={() => setIsModalOpen(true)}
+            className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-medium rounded-lg shadow-sm transition-all flex items-center gap-2"
           >
-            {processing ? (
-              <Loader2 className="w-5 h-5 animate-spin" />
-            ) : isPaid ? (
-              <>
-                <CheckCircle2 className="w-5 h-5" />
-                <span>Payroll Finalized</span>
-              </>
-            ) : (
-              <>
-                <DollarSign className="w-5 h-5" />
-                <span>Mark as Processed</span>
-              </>
-            )}
+            <span>⚡</span>
+            <span>Pay All via Gateway</span>
           </button>
         </div>
+      </div>
 
-        {/* SUMMARY STAT CARDS */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
-            <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Total Net Disbursement</span>
-            <p className="text-3xl font-extrabold text-slate-900 mt-2">P{totalNetPay.toFixed(2)}</p>
-            <p className="text-xs text-slate-500 mt-1">{payrollData.length} Workers Included</p>
-          </div>
-
-          <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm flex flex-col justify-between space-y-4">
-            <div className="flex items-center justify-between">
-              <div>
-                <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Bank EFT Batch</span>
-                <p className="text-2xl font-bold text-slate-900 mt-1">P{bankTotal.toFixed(2)}</p>
-                <p className="text-xs text-slate-500">{bankEntries.length} Bank Accounts</p>
-              </div>
-              <div className="p-3 bg-blue-50 text-blue-600 rounded-xl">
-                <CreditCard className="w-6 h-6" />
-              </div>
-            </div>
-            <button
-              onClick={() => handleDownloadCSV('bank')}
-              disabled={bankEntries.length === 0}
-              className="w-full py-2.5 px-4 bg-slate-100 hover:bg-blue-50 text-slate-800 hover:text-blue-700 font-semibold text-xs rounded-xl border border-slate-200 transition flex items-center justify-center gap-2 disabled:opacity-40"
-            >
-              <Download className="w-4 h-4" />
-              <span>Download Bank CSV</span>
-            </button>
-          </div>
-
-          <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm flex flex-col justify-between space-y-4">
-            <div className="flex items-center justify-between">
-              <div>
-                <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Mobile Money Batch</span>
-                <p className="text-2xl font-bold text-slate-900 mt-1">P{walletTotal.toFixed(2)}</p>
-                <p className="text-xs text-slate-500">{walletEntries.length} Mobile Wallets</p>
-              </div>
-              <div className="p-3 bg-emerald-50 text-emerald-600 rounded-xl">
-                <Wallet className="w-6 h-6" />
-              </div>
-            </div>
-            <button
-              onClick={() => handleDownloadCSV('mobile_wallet')}
-              disabled={walletEntries.length === 0}
-              className="w-full py-2.5 px-4 bg-slate-100 hover:bg-emerald-50 text-slate-800 hover:text-emerald-700 font-semibold text-xs rounded-xl border border-slate-200 transition flex items-center justify-center gap-2 disabled:opacity-40"
-            >
-              <Download className="w-4 h-4" />
-              <span>Download Wallet CSV</span>
-            </button>
-          </div>
+      {/* Summary Stats */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <div className="bg-white p-5 rounded-xl border border-gray-200 shadow-sm">
+          <span className="text-xs font-semibold text-gray-400 uppercase tracking-wider">Active Workers</span>
+          <p className="text-2xl font-bold text-gray-800 mt-1">{payrollData.length}</p>
         </div>
+        <div className="bg-white p-5 rounded-xl border border-gray-200 shadow-sm">
+          <span className="text-xs font-semibold text-gray-400 uppercase tracking-wider">Total Gross Payroll</span>
+          <p className="text-2xl font-bold text-emerald-600 mt-1">
+            BWP {calculateTotal().toFixed(2)}
+          </p>
+        </div>
+        <div className="bg-white p-5 rounded-xl border border-gray-200 shadow-sm">
+          <span className="text-xs font-semibold text-gray-400 uppercase tracking-wider">Pay Period ID</span>
+          <p className="text-sm font-mono font-medium text-slate-600 mt-2 truncate">
+            {payPeriodId || 'Loading...'}
+          </p>
+        </div>
+      </div>
 
-        {/* PAYROLL RECONCILIATION TABLE */}
-        {loading ? (
-          <div className="flex flex-col items-center justify-center py-16 bg-white rounded-2xl border border-slate-200">
-            <Loader2 className="w-8 h-8 text-indigo-600 animate-spin" />
-            <p className="text-slate-500 mt-3 text-sm font-medium">Calculating net payouts...</p>
-          </div>
-        ) : (
-          <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
-            <div className="p-5 border-b border-slate-100 bg-slate-50 flex items-center justify-between">
-              <h2 className="text-base font-bold text-slate-900">Worker Payout Reconciliation Table</h2>
-              <span className="text-xs font-medium text-slate-500">Auto-calculated from paper logbook hours</span>
+      {/* Disbursement Modal */}
+      {isModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+          <div className="bg-white rounded-2xl max-w-2xl w-full p-6 shadow-2xl border border-gray-100 relative max-h-[90vh] overflow-y-auto">
+            
+            {/* Modal Header */}
+            <div className="flex justify-between items-center pb-4 border-b border-gray-100">
+              <div>
+                <h3 className="text-xl font-bold text-gray-900">Authorize Batch Disbursement</h3>
+                <p className="text-xs text-gray-500">DPO Bank Gateway & Orange Money B2C Router</p>
+              </div>
+              <button
+                onClick={() => {
+                  setIsModalOpen(false);
+                  setDisbursementResult(null);
+                  setErrorMsg('');
+                }}
+                className="text-gray-400 hover:text-gray-600 text-lg font-bold"
+              >
+                ✕
+              </button>
             </div>
 
-            <div className="hidden md:block overflow-x-auto">
-              <table className="w-full text-left text-sm border-collapse">
-                <thead className="bg-slate-50/50 border-b border-slate-200 text-slate-600 font-semibold">
-                  <tr>
-                    <th className="py-4 px-6">Worker Name</th>
-                    <th className="py-4 px-6">Hours</th>
-                    <th className="py-4 px-6">Rate</th>
-                    <th className="py-4 px-6">Destination Provider</th>
-                    <th className="py-4 px-6">Account / Wallet No.</th>
-                    <th className="py-4 px-6 text-right">Net Payable</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100">
-                  {payrollData.map((item) => (
-                    <tr key={item.employee_id} className="hover:bg-slate-50/80 transition">
-                      <td className="py-4 px-6 font-semibold text-slate-900">
-                        {item.first_name} {item.last_name}
-                      </td>
-                      <td className="py-4 px-6 text-slate-600 font-medium">{item.total_hours_worked} hrs</td>
-                      <td className="py-4 px-6 text-slate-600">P{parseFloat(item.hourly_rate).toFixed(2)}</td>
-                      <td className="py-4 px-6">
-                        {item.channel === 'MOBILE_WALLET' ? (
-                          <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200">
-                            <Wallet className="w-3.5 h-3.5" />
-                            {item.provider?.name || 'MyZaka / Orange Money / Smega'}
-                          </span>
-                        ) : (
-                          <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold bg-blue-50 text-blue-700 border border-blue-200">
-                            <CreditCard className="w-3.5 h-3.5" />
-                            {item.provider?.name || 'Bank Account'}
-                          </span>
-                        )}
-                      </td>
-                      <td className="py-4 px-6 font-mono text-slate-700">
-                        {item.profile?.account_or_mobile_number || 'N/A'}
-                      </td>
-                      <td className="py-4 px-6 text-right font-extrabold text-slate-900">
-                        P{parseFloat(item.gross_pay || 0).toFixed(2)}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+            {/* State 1: Confirmation Screen before payout */}
+            {!disbursementResult && !disbursing && (
+              <div className="py-6 space-y-4">
+                <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 text-amber-800 text-sm">
+                  ⚠️ You are about to disburse funds to <strong>{payrollData.length} workers</strong> totaling{' '}
+                  <strong>BWP {calculateTotal().toFixed(2)}</strong>. This will execute instant API transactions to registered bank accounts and mobile wallets.
+                </div>
 
-            <div className="grid grid-cols-1 gap-3 p-4 md:hidden">
-              {payrollData.map((item) => (
-                <div key={item.employee_id} className="bg-slate-50 p-4 rounded-xl border border-slate-200 space-y-2">
-                  <div className="flex items-center justify-between">
-                    <h3 className="font-bold text-slate-900">{item.first_name} {item.last_name}</h3>
-                    <span className="text-base font-extrabold text-slate-900">P{parseFloat(item.gross_pay || 0).toFixed(2)}</span>
+                {errorMsg && (
+                  <div className="bg-red-50 border border-red-200 text-red-700 text-sm p-3 rounded-lg">
+                    {errorMsg}
                   </div>
-                  <div className="flex items-center justify-between text-xs text-slate-500 pt-1">
-                    <span>{item.total_hours_worked} hrs @ P{parseFloat(item.hourly_rate).toFixed(2)}/hr</span>
-                    <span className="font-mono bg-white px-2 py-0.5 rounded border border-slate-200">
-                      {item.profile?.account_or_mobile_number || 'N/A'}
-                    </span>
+                )}
+
+                <div className="flex justify-end gap-3 pt-4 border-t border-gray-100">
+                  <button
+                    onClick={() => setIsModalOpen(false)}
+                    className="px-4 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded-lg font-medium"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={handleDisburseAll}
+                    className="px-5 py-2 text-sm bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg font-medium transition-all"
+                  >
+                    Confirm & Execute Payment
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* State 2: Processing Spinner */}
+            {disbursing && (
+              <div className="py-12 flex flex-col items-center justify-center space-y-3">
+                <div className="w-10 h-10 border-4 border-emerald-500 border-t-transparent rounded-full animate-spin"></div>
+                <p className="text-sm font-medium text-gray-700">Connecting to Payment Gateways...</p>
+                <p className="text-xs text-gray-400">Routing DPO EFTs and Orange Money B2C deposits</p>
+              </div>
+            )}
+
+            {/* State 3: Direct Gateway Receipts */}
+            {disbursementResult && (
+              <div className="py-4 space-y-5">
+                <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-4 flex items-center gap-3 text-emerald-800">
+                  <span className="text-2xl">✅</span>
+                  <div>
+                    <h4 className="font-bold text-sm">Disbursement Completed Successfully</h4>
+                    <p className="text-xs">{disbursementResult.message}</p>
                   </div>
                 </div>
-              ))}
-            </div>
+
+                {/* Receipt Table */}
+                <div className="border border-gray-200 rounded-xl overflow-hidden">
+                  <div className="bg-slate-900 text-white text-xs font-semibold px-4 py-2.5 flex justify-between">
+                    <span>TRANSACTION RECEIPT</span>
+                    <span>GATEWAY BATCH SUCCESS</span>
+                  </div>
+                  <div className="divide-y divide-gray-100">
+                    {disbursementResult.disbursements?.map((item, idx) => (
+                      <div key={idx} className="p-3 text-sm flex justify-between items-center bg-gray-50/50">
+                        <div>
+                          <p className="font-semibold text-gray-800">{item.employee_name}</p>
+                          <p className="text-xs text-gray-500">{item.channel}</p>
+                        </div>
+                        <div className="text-right">
+                          <p className="font-bold text-emerald-600">BWP {parseFloat(item.amount).toFixed(2)}</p>
+                          <p className="text-[10px] font-mono text-gray-400">{item.reference}</p>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="flex justify-end pt-2">
+                  <button
+                    onClick={() => {
+                      setIsModalOpen(false);
+                      setDisbursementResult(null);
+                    }}
+                    className="px-5 py-2 bg-slate-900 hover:bg-slate-800 text-white text-sm font-medium rounded-lg"
+                  >
+                    Done & Close
+                  </button>
+                </div>
+              </div>
+            )}
 
           </div>
-        )}
-
-      </div>
+        </div>
+      )}
     </div>
   );
 }
