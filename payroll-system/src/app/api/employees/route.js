@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { supabase } from '@/lib/supabase';
 
-// GET: Fetch all active employees with payout details
+// GET: Fetch all active/inactive employees with payout details and attached documents
 export async function GET() {
   try {
     const { data, error } = await supabase
@@ -9,10 +9,14 @@ export async function GET() {
       .select(`
         id,
         employee_code,
+        national_id,
         first_name,
         last_name,
         phone_number,
+        job_role,
+        department,
         hourly_rate,
+        overtime_rate,
         is_active,
         created_at,
         employee_payout_profiles (
@@ -30,29 +34,44 @@ export async function GET() {
               name
             )
           )
+        ),
+        employee_documents (
+          id,
+          document_type,
+          document_url,
+          file_path,
+          created_at
         )
       `)
-      .eq('is_active', true)
       .order('created_at', { ascending: false });
 
-    if (error) throw error;
-    return NextResponse.json({ success: true, data });
+    if (error) {
+      console.error('Supabase GET Error:', error);
+      return NextResponse.json({ success: false, error: error.message }, { status: 400 });
+    }
+
+    return NextResponse.json({ success: true, data: data || [] });
   } catch (err) {
-    return NextResponse.json({ success: false, error: err.message }, { status: 500 });
+    console.error('Server GET Exception:', err);
+    return NextResponse.json({ success: false, error: err.message || 'Internal server error' }, { status: 500 });
   }
 }
 
-// POST: Register a new employee and create their payment profile
+// POST: Register a new employee with complete profile details
 export async function POST(request) {
   try {
     const body = await request.json();
     const {
       employee_code,
+      national_id,
       first_name,
       last_name,
       phone_number,
+      job_role,
+      department,
       hourly_rate,
-      payout_provider_id, // Foreign key ID pointing to FNB, ABSA, Orange Money, etc.
+      overtime_rate,
+      payout_provider_id,
       account_or_mobile_number,
       branch_code
     } = body;
@@ -70,18 +89,26 @@ export async function POST(request) {
       .insert([
         {
           employee_code,
+          national_id: national_id || null,
           first_name,
           last_name,
           phone_number,
-          hourly_rate: parseFloat(hourly_rate)
+          job_role: job_role || 'General Worker',
+          department: department || 'General',
+          hourly_rate: parseFloat(hourly_rate),
+          overtime_rate: overtime_rate ? parseFloat(overtime_rate) : parseFloat(hourly_rate) * 1.5,
+          is_active: true
         }
       ])
       .select()
       .single();
 
-    if (employeeError) throw employeeError;
+    if (employeeError) {
+      console.error('Employee Insert Error:', employeeError);
+      return NextResponse.json({ success: false, error: employeeError.message }, { status: 400 });
+    }
 
-    // 2. Insert Payout Profile Record linked to the new Employee ID
+    // 2. Insert Payout Profile Record
     const { data: profileData, error: profileError } = await supabase
       .from('employee_payout_profiles')
       .insert([
@@ -96,7 +123,10 @@ export async function POST(request) {
       .select()
       .single();
 
-    if (profileError) throw profileError;
+    if (profileError) {
+      console.error('Payout Profile Insert Error:', profileError);
+      return NextResponse.json({ success: false, error: profileError.message }, { status: 400 });
+    }
 
     return NextResponse.json(
       {
@@ -109,6 +139,7 @@ export async function POST(request) {
       { status: 201 }
     );
   } catch (err) {
-    return NextResponse.json({ success: false, error: err.message }, { status: 500 });
+    console.error('Server POST Exception:', err);
+    return NextResponse.json({ success: false, error: err.message || 'Internal Server Error' }, { status: 500 });
   }
 }

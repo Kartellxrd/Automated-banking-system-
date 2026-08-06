@@ -12,6 +12,7 @@ export default function DashboardLayout({ children }) {
     { label: 'Worker Directory', href: '/dashboard/employees', icon: '👥' },
     { label: 'Logbook Hours Entry', href: '/dashboard/hours', icon: '📝' },
     { label: 'Payroll & Disburse', href: '/dashboard/payroll', icon: '💳' },
+    { label: 'Pay Cycles', href: '/dashboard/pay-periods', icon: '🗓️' }
   ];
 
   const handleLogout = async () => {
