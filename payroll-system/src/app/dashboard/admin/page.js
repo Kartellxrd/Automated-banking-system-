@@ -3,42 +3,32 @@
 import { useState, useEffect } from 'react';
 import {
   UserPlus,
-  Shield,
   Users,
   RefreshCw,
   CheckCircle2,
   AlertCircle,
   Lock,
-  Building2,
-  LogOut,
   User,
   Eye,
   X,
-  Menu,
   ChevronDown,
-  LayoutDashboard,
-  Clock,
-  KeyRound,
-  FileText,
   Search,
   Activity,
   ShieldCheck,
-  MapPin,
-  TrendingUp
+  MapPin
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
+import AdminNavbar from '@/components/admin/AdminNavbar';
+import AdminSideNav from '@/components/admin/AdminSideNav';
 
 export default function AdminDashboardPage() {
   const [users, setUsers] = useState([]);
-  const [currentAdmin, setCurrentAdmin] = useState(null);
   const [loading, setLoading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [updatingRoleId, setUpdatingRoleId] = useState(null);
   const [message, setMessage] = useState({ type: '', text: '' });
   const [selectedProfile, setSelectedProfile] = useState(null);
-  const [activeTab, setActiveTab] = useState('dashboard');
   const [searchQuery, setSearchQuery] = useState('');
-  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   const [formData, setFormData] = useState({
     first_name: '',
@@ -50,21 +40,8 @@ export default function AdminDashboardPage() {
   });
 
   useEffect(() => {
-    fetchCurrentAdmin();
     fetchUsers();
   }, []);
-
-  const fetchCurrentAdmin = async () => {
-    const { data: { user } } = await supabase.auth.getUser();
-    if (user) {
-      const { data: profile } = await supabase
-        .from('profiles')
-        .select('*')
-        .eq('id', user.id)
-        .single();
-      setCurrentAdmin(profile || { email: user.email, role: 'admin' });
-    }
-  };
 
   const fetchUsers = async () => {
     setLoading(true);
@@ -139,11 +116,6 @@ export default function AdminDashboardPage() {
     }
   };
 
-  const handleLogout = async () => {
-    await supabase.auth.signOut();
-    window.location.href = '/login';
-  };
-
   const filteredUsers = users.filter((u) => {
     const fullName = `${u.first_name || ''} ${u.last_name || ''}`.toLowerCase();
     const email = (u.email || '').toLowerCase();
@@ -151,193 +123,22 @@ export default function AdminDashboardPage() {
     return fullName.includes(query) || email.includes(query);
   });
 
-  // Calculate System Admin Stats
+  // Calculate live statistics
   const totalUsers = users.length;
   const totalAdmins = users.filter((u) => u.role === 'admin').length;
   const siteLocations = new Set(users.map((u) => u.site_location || 'Main Office')).size;
 
-  const renderNavLinks = () => (
-    <nav className="space-y-1">
-      <button
-        onClick={() => { setActiveTab('dashboard'); setMobileMenuOpen(false); }}
-        className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl font-medium text-xs transition ${
-          activeTab === 'dashboard'
-            ? 'bg-amber-500 text-slate-950 font-bold shadow-lg shadow-amber-500/20'
-            : 'text-slate-300 hover:bg-slate-800/60 hover:text-white'
-        }`}
-      >
-        <LayoutDashboard className="w-4 h-4" />
-        <span>Dashboard</span>
-      </button>
-
-      <button
-        onClick={() => { setActiveTab('employees'); setMobileMenuOpen(false); }}
-        className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl font-medium text-xs transition ${
-          activeTab === 'employees'
-            ? 'bg-amber-500 text-slate-950 font-bold shadow-lg shadow-amber-500/20'
-            : 'text-slate-300 hover:bg-slate-800/60 hover:text-white'
-        }`}
-      >
-        <Users className="w-4 h-4" />
-        <span>Employees & Staff</span>
-      </button>
-
-      <button
-        onClick={() => { setActiveTab('roles'); setMobileMenuOpen(false); }}
-        className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl font-medium text-xs transition ${
-          activeTab === 'roles'
-            ? 'bg-amber-500 text-slate-950 font-bold shadow-lg shadow-amber-500/20'
-            : 'text-slate-300 hover:bg-slate-800/60 hover:text-white'
-        }`}
-      >
-        <KeyRound className="w-4 h-4" />
-        <span>Role Permissions</span>
-      </button>
-
-      <button
-        onClick={() => { setActiveTab('shifts'); setMobileMenuOpen(false); }}
-        className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl font-medium text-xs transition ${
-          activeTab === 'shifts'
-            ? 'bg-amber-500 text-slate-950 font-bold shadow-lg shadow-amber-500/20'
-            : 'text-slate-300 hover:bg-slate-800/60 hover:text-white'
-        }`}
-      >
-        <Clock className="w-4 h-4" />
-        <span>Shift Approvals Oversight</span>
-      </button>
-
-      <button
-        onClick={() => { setActiveTab('audit'); setMobileMenuOpen(false); }}
-        className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl font-medium text-xs transition ${
-          activeTab === 'audit'
-            ? 'bg-amber-500 text-slate-950 font-bold shadow-lg shadow-amber-500/20'
-            : 'text-slate-300 hover:bg-slate-800/60 hover:text-white'
-        }`}
-      >
-        <FileText className="w-4 h-4" />
-        <span>System Audit Logs</span>
-      </button>
-    </nav>
-  );
-
   return (
     <div className="min-h-screen bg-[#0B0F17] text-white flex flex-col lg:flex-row">
-      {/* Mobile Top Navigation Header */}
-      <div className="lg:hidden bg-[#0F172A] border-b border-slate-800/80 p-4 flex items-center justify-between sticky top-0 z-40">
-        <div className="flex items-center gap-2.5">
-          <div className="p-2 rounded-lg bg-amber-500/20 border border-amber-500/30 text-amber-400">
-            <Building2 className="w-4 h-4" />
-          </div>
-          <span className="font-bold text-white text-sm">Periscope Mining</span>
-        </div>
-        <button
-          onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
-          className="p-2 text-slate-300 hover:text-white bg-slate-900 border border-slate-800 rounded-lg"
-        >
-          {mobileMenuOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
-        </button>
-      </div>
+      {/* Shared Modular Side Navigation */}
+      <AdminSideNav />
 
-      {/* Mobile Sidebar Overlay Drawer */}
-      {mobileMenuOpen && (
-        <div className="lg:hidden fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex">
-          <div className="w-72 bg-[#0F172A] border-r border-slate-800/80 p-5 flex flex-col justify-between h-full">
-            <div className="space-y-6">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-3">
-                  <div className="p-2.5 rounded-xl bg-amber-500/20 border border-amber-500/30 text-amber-400">
-                    <Building2 className="w-5 h-5" />
-                  </div>
-                  <div>
-                    <h1 className="font-bold text-white text-base leading-none">Periscope</h1>
-                    <p className="text-[10px] text-amber-400 font-semibold uppercase tracking-wider mt-1">Admin Portal</p>
-                  </div>
-                </div>
-                <button onClick={() => setMobileMenuOpen(false)} className="text-slate-400 hover:text-white">
-                  <X className="w-5 h-5" />
-                </button>
-              </div>
-
-              {renderNavLinks()}
-            </div>
-
-            <div className="pt-4 border-t border-slate-800/80">
-              <button
-                onClick={handleLogout}
-                className="w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-semibold text-rose-400 hover:bg-rose-500/10 transition"
-              >
-                <LogOut className="w-4 h-4" />
-                <span>Sign Out</span>
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Desktop Sidenav */}
-      <aside className="hidden lg:flex w-64 bg-[#0F172A] border-r border-slate-800/80 p-4 flex-col justify-between shrink-0 sticky top-0 h-screen">
-        <div className="space-y-6">
-          <div className="flex items-center gap-3 px-2 pt-2">
-            <div className="p-2.5 rounded-xl bg-amber-500/20 border border-amber-500/30 text-amber-400">
-              <Building2 className="w-5 h-5" />
-            </div>
-            <div>
-              <h1 className="font-bold text-white text-base leading-none">Periscope Mining</h1>
-              <p className="text-[10px] text-amber-400 font-semibold uppercase tracking-wider mt-1">Admin Portal</p>
-            </div>
-          </div>
-
-          {renderNavLinks()}
-        </div>
-
-        <div className="pt-4 border-t border-slate-800/80">
-          <button
-            onClick={handleLogout}
-            className="w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-semibold text-rose-400 hover:bg-rose-500/10 transition"
-          >
-            <LogOut className="w-4 h-4" />
-            <span>Sign Out</span>
-          </button>
-        </div>
-      </aside>
-
-      {/* Main Content Area */}
+      {/* Main Page Body */}
       <main className="flex-1 p-4 sm:p-6 lg:p-8 space-y-6 overflow-x-hidden">
-        {/* Top Navbar Header */}
-        <header className="bg-[#111827] border border-slate-800 rounded-2xl p-4 sm:p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-          <div className="flex items-center space-x-3">
-            <div className="p-3 rounded-xl bg-indigo-600/20 border border-indigo-500/30 text-indigo-400">
-              <Shield className="w-6 h-6 text-amber-400" />
-            </div>
-            <div>
-              <div className="flex items-center gap-2">
-                <span className="bg-amber-500/20 text-amber-300 border border-amber-500/30 text-[10px] font-bold px-2.5 py-0.5 rounded-full">
-                  ADMINISTRATOR CONTROL
-                </span>
-              </div>
-              <h1 className="text-lg sm:text-xl font-bold text-white mt-1">
-                {activeTab === 'dashboard' ? 'Admin Statistics & Overview' : 'Staff Management & Provisioning'}
-              </h1>
-            </div>
-          </div>
+        {/* Shared Modular Top Navbar Header */}
+        <AdminNavbar title="Admin Statistics & System Overview" />
 
-          <div className="flex items-center space-x-3 bg-[#030712] border border-slate-800 px-3.5 py-2 rounded-xl">
-            <div className="w-8 h-8 rounded-lg bg-indigo-600 flex items-center justify-center text-white font-bold text-xs">
-              {currentAdmin?.email ? currentAdmin.email[0].toUpperCase() : 'A'}
-            </div>
-            <div className="text-left">
-              <p className="text-xs font-semibold text-white truncate max-w-[140px]">
-                {currentAdmin?.first_name ? `${currentAdmin.first_name} ${currentAdmin.last_name}` : currentAdmin?.email || 'Admin'}
-              </p>
-              <p className="text-[10px] text-emerald-400 flex items-center gap-1">
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-                Active Administrator
-              </p>
-            </div>
-          </div>
-        </header>
-
-        {/* Dashboard View Stats Summary */}
+        {/* Dashboard Statistics Cards Row */}
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
           <div className="bg-[#111827] border border-slate-800 p-4 rounded-2xl flex items-center justify-between">
             <div>
@@ -380,7 +181,7 @@ export default function AdminDashboardPage() {
           </div>
         </div>
 
-        {/* Dashboard Grid */}
+        {/* Action Content Grid */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           {/* Add Employee Form */}
           <div className="bg-[#111827] p-5 sm:p-6 rounded-2xl border border-slate-800 space-y-4">
@@ -504,7 +305,6 @@ export default function AdminDashboardPage() {
                 <h2 className="font-bold text-white text-base">Employee Directory ({filteredUsers.length})</h2>
               </div>
 
-              {/* Search + Refresh */}
               <div className="flex items-center gap-2">
                 <div className="relative">
                   <input
@@ -526,7 +326,7 @@ export default function AdminDashboardPage() {
               </div>
             </div>
 
-            {/* Desktop Table View */}
+            {/* Table View */}
             <div className="hidden sm:block overflow-x-auto">
               <table className="w-full text-left text-xs">
                 <thead className="bg-[#030712] text-slate-400 font-semibold border-b border-slate-800">
@@ -613,7 +413,7 @@ export default function AdminDashboardPage() {
         </div>
       </main>
 
-      {/* Profile Detail Modal */}
+      {/* Selected Staff Profile Modal */}
       {selectedProfile && (
         <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
           <div className="bg-[#111827] border border-slate-800 rounded-2xl w-full max-w-md p-6 space-y-5 shadow-2xl relative">
