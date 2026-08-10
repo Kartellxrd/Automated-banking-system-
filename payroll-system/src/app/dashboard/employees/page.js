@@ -639,7 +639,7 @@ export default function EmployeesPage() {
                   <optgroup label="Mobile Wallets">
                     <option value="4">Orange Money</option>
                     <option value="5">Smega (BTC)</option>
-                    <option value="6">MyZigo</option>
+                    <option value="6">MyZaka</option>
                   </optgroup>
                 </select>
               </div>
