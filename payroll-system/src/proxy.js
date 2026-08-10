@@ -48,12 +48,10 @@ export async function proxy(request) {
 
     const role = profile?.role;
 
-    // CEO and Admin can access any route
     if (role === 'admin' || role === 'ceo') {
       return response;
     }
 
-    // Role-specific route enforcement
     if (url.pathname.startsWith('/dashboard/hr') && role !== 'hr') {
       url.pathname = `/dashboard/${role.replace('_', '-')}`;
       return NextResponse.redirect(url);
