@@ -52,12 +52,12 @@ export default function AdminSideNav() {
     },
     {
       name: 'Access & Role Matrix',
-      href: '/dashboard/admin/roles',
+      href: '/dashboard/admin/matrix',
       icon: Sliders,
     },
     {
       name: 'Security & Audit Logs',
-      href: '/dashboard/admin/audit',
+      href: '/dashboard/admin/audit-logs',
       icon: ShieldAlert,
     },
   ];
