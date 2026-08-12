@@ -49,7 +49,7 @@ export default function LoginPage() {
         throw new Error('Authentication succeeded, but no user context was returned.');
       }
 
-      // 2. Fetch User Profile
+      // 2. Fetch User Profile & Role
       const { data: profile, error: profileError } = await supabase
         .from('profiles')
         .select('role')
@@ -57,20 +57,37 @@ export default function LoginPage() {
         .maybeSingle();
 
       if (profileError) {
-        console.error('Profile fetch note:', profileError);
-        // Fallback to proxy-handled default route via full page reload
-        window.location.href = '/dashboard/admin';
-        return;
+        console.error('Profile fetch error:', profileError);
+        throw new Error('Could not retrieve user profile roles. Please ensure database migrations are complete.');
       }
 
-      // 3. Hard navigation ensures auth cookies reach proxy middleware without 307 loop
-      const role = profile?.role ? profile.role.toLowerCase() : '';
-      if (role === 'admin' || role === 'ceo') {
-        window.location.href = '/dashboard/admin';
-      } else if (role) {
-        window.location.href = `/dashboard/${role.replace('_', '-')}`;
-      } else {
-        window.location.href = '/dashboard';
+      if (!profile || !profile.role) {
+        throw new Error('Your account is registered but missing a designated role. Please contact a system administrator.');
+      }
+
+      // 3. Dynamic Navigation Based on Assigned System Role
+      const role = profile.role.toLowerCase().trim();
+
+      switch (role) {
+        case 'admin':
+          window.location.href = '/dashboard/admin';
+          break;
+        case 'ceo':
+          window.location.href = '/dashboard/ceo';
+          break;
+        case 'hr':
+          window.location.href = '/dashboard/hr';
+          break;
+        case 'accountant':
+          window.location.href = '/dashboard/accountant';
+          break;
+        case 'site_clerk':
+        case 'site-clerk':
+          window.location.href = '/dashboard/site-clerk';
+          break;
+        default:
+          window.location.href = `/dashboard/${role.replace('_', '-')}`;
+          break;
       }
     } catch (err) {
       setError(err.message || 'An unexpected error occurred during sign in.');
