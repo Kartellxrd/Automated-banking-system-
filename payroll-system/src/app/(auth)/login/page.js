@@ -2,7 +2,18 @@
 
 import { useState } from 'react';
 import { supabase } from '@/lib/supabase';
-import { Mail, Lock, Eye, EyeOff, ArrowRight, ShieldAlert, Loader2, Sparkles, Building2 } from 'lucide-react';
+import { 
+  Mail, 
+  Lock, 
+  Eye, 
+  EyeOff, 
+  ArrowRight, 
+  ShieldAlert, 
+  Loader2, 
+  Sparkles, 
+  Building2,
+  CheckCircle2 
+} from 'lucide-react';
 
 export default function LoginPage() {
   const [email, setEmail] = useState('');
@@ -10,10 +21,33 @@ export default function LoginPage() {
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [successMsg, setSuccessMsg] = useState('');
+
+  // Helper to turn backend roles into user-friendly display labels
+  const formatRoleLabel = (roleStr) => {
+    switch (roleStr) {
+      case 'site_clerk':
+      case 'site-clerk':
+        return 'Site Clerk';
+      case 'hr':
+        return 'HR Manager';
+      case 'accountant':
+        return 'Accountant';
+      case 'ceo':
+        return 'CEO / Executive';
+      case 'admin':
+        return 'Administrator';
+      case 'worker':
+        return 'Field Worker';
+      default:
+        return roleStr.charAt(0).toUpperCase() + roleStr.slice(1);
+    }
+  };
 
   const handleLogin = async (e) => {
     e.preventDefault();
     setError('');
+    setSuccessMsg('');
     setLoading(true);
 
     const cleanEmail = email.trim().toLowerCase();
@@ -65,30 +99,45 @@ export default function LoginPage() {
         throw new Error('Your account is registered but missing a designated role. Please contact a system administrator.');
       }
 
-      // 3. Dynamic Navigation Based on Assigned System Role
-      const role = profile.role.toLowerCase().trim();
+      // 3. System Feedback & Navigation Based on Assigned Role
+      const rawRole = profile.role.toLowerCase().trim();
+      const displayRole = formatRoleLabel(rawRole);
 
-      switch (role) {
+      // Trigger user feedback prompt
+      setSuccessMsg(`Login successful! Redirecting as ${displayRole}...`);
+
+      // Determine Target Route
+      let targetUrl = '/clock-in';
+      switch (rawRole) {
         case 'admin':
-          window.location.href = '/dashboard/admin';
+          targetUrl = '/dashboard/admin';
           break;
         case 'ceo':
-          window.location.href = '/dashboard/ceo';
+          targetUrl = '/dashboard/ceo';
           break;
         case 'hr':
-          window.location.href = '/dashboard/hr';
+          targetUrl = '/dashboard/hr';
           break;
         case 'accountant':
-          window.location.href = '/dashboard/accountant';
+          targetUrl = '/dashboard/accountant';
           break;
         case 'site_clerk':
         case 'site-clerk':
-          window.location.href = '/dashboard/site-clerk';
+          targetUrl = '/dashboard/site-clerk';
+          break;
+        case 'worker':
+          targetUrl = '/clock-in';
           break;
         default:
-          window.location.href = `/dashboard/${role.replace('_', '-')}`;
+          targetUrl = `/dashboard/${rawRole.replace('_', '-')}`;
           break;
       }
+
+      // Brief delay to let the user read the feedback before page switch
+      setTimeout(() => {
+        window.location.href = targetUrl;
+      }, 1000);
+
     } catch (err) {
       setError(err.message || 'An unexpected error occurred during sign in.');
       setLoading(false);
@@ -126,7 +175,15 @@ export default function LoginPage() {
           </p>
         </div>
 
-        {/* Error Alert Box */}
+        {/* System Feedback: Success Alert Box */}
+        {successMsg && (
+          <div className="p-4 rounded-2xl bg-emerald-500/10 border border-emerald-500/20 flex items-center space-x-3 text-emerald-300 text-xs sm:text-sm animate-in fade-in duration-200">
+            <CheckCircle2 className="w-5 h-5 text-emerald-400 shrink-0" />
+            <span className="font-semibold leading-relaxed">{successMsg}</span>
+          </div>
+        )}
+
+        {/* System Feedback: Error Alert Box */}
         {error && (
           <div className="p-4 rounded-2xl bg-rose-500/10 border border-rose-500/20 flex items-start space-x-3 text-rose-300 text-xs sm:text-sm animate-in fade-in duration-200">
             <ShieldAlert className="w-5 h-5 text-rose-400 shrink-0 mt-0.5" />
@@ -148,10 +205,11 @@ export default function LoginPage() {
               <input
                 type="email"
                 required
+                disabled={loading || Boolean(successMsg)}
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 placeholder="name@company.com"
-                className="w-full pl-11 pr-4 py-3 bg-slate-950/80 border border-slate-800 rounded-xl text-slate-100 placeholder-slate-600 text-sm focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-all duration-150"
+                className="w-full pl-11 pr-4 py-3 bg-slate-950/80 border border-slate-800 rounded-xl text-slate-100 placeholder-slate-600 text-sm focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-all duration-150 disabled:opacity-50"
               />
             </div>
           </div>
@@ -168,10 +226,11 @@ export default function LoginPage() {
               <input
                 type={showPassword ? 'text' : 'password'}
                 required
+                disabled={loading || Boolean(successMsg)}
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 placeholder="••••••••"
-                className="w-full pl-11 pr-12 py-3 bg-slate-950/80 border border-slate-800 rounded-xl text-slate-100 placeholder-slate-600 text-sm focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-all duration-150"
+                className="w-full pl-11 pr-12 py-3 bg-slate-950/80 border border-slate-800 rounded-xl text-slate-100 placeholder-slate-600 text-sm focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-all duration-150 disabled:opacity-50"
               />
               <button
                 type="button"
@@ -187,7 +246,7 @@ export default function LoginPage() {
           {/* Submit Button */}
           <button
             type="submit"
-            disabled={loading}
+            disabled={loading || Boolean(successMsg)}
             className="w-full relative group overflow-hidden flex items-center justify-center space-x-2 py-3.5 px-4 rounded-xl bg-indigo-600 hover:bg-indigo-500 active:bg-indigo-700 text-white font-semibold text-sm transition-all duration-200 shadow-lg shadow-indigo-600/25 disabled:opacity-50 disabled:cursor-not-allowed focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 focus:ring-offset-slate-950"
           >
             {loading ? (
@@ -204,7 +263,7 @@ export default function LoginPage() {
           </button>
         </form>
 
-        {/* Footer info */}
+        {/* Footer Info */}
         <div className="pt-2 border-t border-slate-800/60 text-center">
           <p className="text-xs text-slate-500">
             Protected with row-level encryption and secure middleware authorization.

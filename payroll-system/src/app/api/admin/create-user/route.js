@@ -19,11 +19,11 @@ export async function POST(req) {
       );
     }
 
-    // Validate allowed ENUM roles
-    const validRoles = ['admin', 'ceo', 'hr', 'accountant', 'site_clerk'];
-    const assignedRole = validRoles.includes(role) ? role : 'site_clerk';
+    // 1. Updated allowed ENUM roles to include 'worker' and default to 'worker'
+    const validRoles = ['admin', 'ceo', 'hr', 'accountant', 'site_clerk', 'worker'];
+    const assignedRole = validRoles.includes(role) ? role : 'worker';
 
-    // 1. Create the user in Supabase Auth
+    // 2. Create the user in Supabase Auth
     const { data: authData, error: authError } = await supabaseAdmin.auth.admin.createUser({
       email,
       password,
@@ -45,7 +45,7 @@ export async function POST(req) {
 
     const userId = authData.user.id;
 
-    // 2. Insert or Update the user record in public.profiles table
+    // 3. Insert or Update the user record in public.profiles table
     const { error: profileError } = await supabaseAdmin
       .from('profiles')
       .upsert({
