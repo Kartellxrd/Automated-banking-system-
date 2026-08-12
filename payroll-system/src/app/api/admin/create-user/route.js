@@ -19,6 +19,10 @@ export async function POST(req) {
       );
     }
 
+    // Validate allowed ENUM roles
+    const validRoles = ['admin', 'ceo', 'hr', 'accountant', 'site_clerk'];
+    const assignedRole = validRoles.includes(role) ? role : 'site_clerk';
+
     // 1. Create the user in Supabase Auth
     const { data: authData, error: authError } = await supabaseAdmin.auth.admin.createUser({
       email,
@@ -27,8 +31,8 @@ export async function POST(req) {
       user_metadata: {
         first_name,
         last_name,
-        role,
-        site_location
+        role: assignedRole,
+        site_location: site_location || 'Headquarters'
       }
     });
 
@@ -49,8 +53,8 @@ export async function POST(req) {
         first_name,
         last_name,
         email,
-        role,
-        site_location,
+        role: assignedRole,
+        site_location: site_location || 'Headquarters',
         updated_at: new Date().toISOString()
       });
 

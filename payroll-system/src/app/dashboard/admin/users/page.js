@@ -13,17 +13,10 @@ import {
   X,
   ChevronDown,
   Search,
-  Shield,
   ShieldCheck,
-  MapPin,
-  Mail,
   Building2,
-  Calendar,
-  Filter,
   UserCheck,
-  UserX,
-  MoreVertical,
-  KeyRound
+  Wand2
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import AdminNavbar from '@/components/admin/AdminNavbar';
@@ -44,6 +37,9 @@ export default function UserProvisioningPage() {
   const [searchQuery, setSearchQuery] = useState('');
   const [roleFilter, setRoleFilter] = useState('ALL');
 
+  // Company domain setting for email auto-generation
+  const COMPANY_DOMAIN = 'periscope.co.bw';
+
   // New Provision Form Data
   const [formData, setFormData] = useState({
     first_name: '',
@@ -51,12 +47,37 @@ export default function UserProvisioningPage() {
     email: '',
     password: '',
     role: 'site_clerk',
-    site_location: 'Debete Mine'
+    site_location: 'Headquarters'
   });
 
   useEffect(() => {
     fetchUsers();
   }, []);
+
+  // Auto-generate Company Email from First and Last Name
+  const handleNameChange = (field, value) => {
+    const updatedForm = { ...formData, [field]: value };
+    const firstName = updatedForm.first_name.trim().toLowerCase();
+    const lastName = updatedForm.last_name.trim().toLowerCase().replace(/\s+/g, '');
+
+    if (firstName && lastName) {
+      updatedForm.email = `${firstName[0]}.${lastName}@${COMPANY_DOMAIN}`;
+    } else if (lastName) {
+      updatedForm.email = `${lastName}@${COMPANY_DOMAIN}`;
+    }
+
+    setFormData(updatedForm);
+  };
+
+  // Generate Random Temporary Password
+  const generateRandomPassword = () => {
+    const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@#$%';
+    let randPass = '';
+    for (let i = 0; i < 10; i++) {
+      randPass += chars.charAt(Math.floor(Math.random() * chars.length));
+    }
+    setFormData((prev) => ({ ...prev, password: randPass }));
+  };
 
   // Fetch Users from Supabase
   const fetchUsers = async () => {
@@ -102,7 +123,7 @@ export default function UserProvisioningPage() {
         email: '',
         password: '',
         role: 'site_clerk',
-        site_location: 'Debete Mine'
+        site_location: 'Headquarters'
       });
       setIsProvisionModalOpen(false);
       fetchUsers();
@@ -154,13 +175,9 @@ export default function UserProvisioningPage() {
 
   return (
     <div className="min-h-screen bg-slate-100 text-slate-900 flex flex-col lg:flex-row font-sans">
-      {/* 1. Modular Sidebar */}
       <AdminSideNav />
 
-      {/* 2. Main Work Area (Sits in between Sidebar & Navbar) */}
       <main className="flex-1 p-4 sm:p-6 lg:p-8 space-y-6 overflow-x-hidden">
-        
-        {/* 3. Modular Top Navbar Header */}
         <AdminNavbar title="User Provisioning & Access Control" />
 
         {/* Global Toast Notification */}
@@ -229,10 +246,8 @@ export default function UserProvisioningPage() {
           </div>
         </div>
 
-        {/* Directory Card & Action Bar */}
+        {/* Directory Card */}
         <div className="bg-white p-5 sm:p-6 rounded-2xl border border-slate-200 space-y-4 shadow-xs">
-          
-          {/* Action Header */}
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-200 pb-4">
             <div>
               <h2 className="font-bold text-slate-900 text-base">Provisioned System Users</h2>
@@ -240,7 +255,6 @@ export default function UserProvisioningPage() {
             </div>
 
             <div className="flex flex-wrap items-center gap-2.5">
-              {/* Search Bar */}
               <div className="relative">
                 <input
                   type="text"
@@ -252,7 +266,6 @@ export default function UserProvisioningPage() {
                 <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-3" />
               </div>
 
-              {/* Role Filter */}
               <select
                 value={roleFilter}
                 onChange={(e) => setRoleFilter(e.target.value)}
@@ -266,7 +279,6 @@ export default function UserProvisioningPage() {
                 <option value="admin">Admins</option>
               </select>
 
-              {/* Data Refresh */}
               <button
                 onClick={fetchUsers}
                 className="p-2 text-slate-600 hover:text-indigo-600 rounded-xl transition bg-slate-50 hover:bg-slate-100 border border-slate-200"
@@ -275,7 +287,6 @@ export default function UserProvisioningPage() {
                 <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin text-indigo-600' : ''}`} />
               </button>
 
-              {/* Open Provision User Modal Trigger */}
               <button
                 onClick={() => setIsProvisionModalOpen(true)}
                 className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold px-4 py-2 rounded-xl transition shadow-sm shadow-indigo-600/20"
@@ -353,57 +364,13 @@ export default function UserProvisioningPage() {
               </tbody>
             </table>
           </div>
-
-          {/* Mobile View */}
-          <div className="sm:hidden space-y-3">
-            {filteredUsers.length === 0 ? (
-              <div className="p-6 text-center text-slate-400 text-xs font-medium">No records found.</div>
-            ) : (
-              filteredUsers.map((user) => (
-                <div key={user.id} className="p-4 bg-slate-50 rounded-xl border border-slate-200 space-y-3">
-                  <div className="flex items-center justify-between">
-                    <span className="font-bold text-slate-900 text-xs">
-                      {user.first_name || user.last_name
-                        ? `${user.first_name || ''} ${user.last_name || ''}`.trim()
-                        : 'Unnamed Employee'}
-                    </span>
-                    <button
-                      onClick={() => setSelectedProfile(user)}
-                      className="p-1.5 text-slate-500 hover:text-indigo-600 rounded-lg bg-white border border-slate-200"
-                    >
-                      <Eye className="w-4 h-4" />
-                    </button>
-                  </div>
-                  
-                  <div className="text-xs text-slate-600 truncate">{user.email}</div>
-                  
-                  <div className="flex items-center justify-between pt-2 border-t border-slate-200">
-                    <select
-                      value={user.role}
-                      disabled={updatingRoleId === user.id}
-                      onChange={(e) => handleRoleChange(user.id, e.target.value)}
-                      className="text-[10px] font-bold px-2 py-1 rounded bg-white border border-slate-200 text-indigo-600 uppercase"
-                    >
-                      <option value="site_clerk">Site Clerk</option>
-                      <option value="hr">HR Manager</option>
-                      <option value="accountant">Accountant</option>
-                      <option value="ceo">CEO</option>
-                      <option value="admin">Admin</option>
-                    </select>
-                    <span className="text-[11px] font-semibold text-slate-500">{user.site_location || 'Headquarters'}</span>
-                  </div>
-                </div>
-              ))
-            )}
-          </div>
         </div>
       </main>
 
-      {/* Modal 1: Provision New User Modal */}
+      {/* Provision User Modal with Auto-Generator Features */}
       {isProvisionModalOpen && (
         <div className="fixed inset-0 z-50 bg-slate-900/40 backdrop-blur-xs flex items-center justify-center p-4 overflow-y-auto">
           <div className="bg-white border border-slate-200 rounded-2xl w-full max-w-lg p-6 space-y-5 shadow-2xl relative my-8 animate-in fade-in zoom-in duration-150">
-            
             <button
               onClick={() => setIsProvisionModalOpen(false)}
               className="absolute top-4 right-4 p-1.5 text-slate-400 hover:text-slate-700 rounded-lg hover:bg-slate-100 transition"
@@ -429,7 +396,7 @@ export default function UserProvisioningPage() {
                     type="text"
                     required
                     value={formData.first_name}
-                    onChange={(e) => setFormData({ ...formData, first_name: e.target.value })}
+                    onChange={(e) => handleNameChange('first_name', e.target.value)}
                     className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:border-indigo-600 focus:bg-white text-slate-900 transition"
                     placeholder="e.g. Lorato"
                   />
@@ -440,35 +407,46 @@ export default function UserProvisioningPage() {
                     type="text"
                     required
                     value={formData.last_name}
-                    onChange={(e) => setFormData({ ...formData, last_name: e.target.value })}
+                    onChange={(e) => handleNameChange('last_name', e.target.value)}
                     className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:border-indigo-600 focus:bg-white text-slate-900 transition"
                     placeholder="e.g. Molefe"
                   />
                 </div>
               </div>
 
+              {/* Email Generator Input */}
               <div>
-                <label className="block text-slate-700 font-semibold mb-1">Company Email</label>
+                <label className="block text-slate-700 font-semibold mb-1">Company Email (Auto-Generated)</label>
                 <input
                   type="email"
                   required
                   value={formData.email}
                   onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-                  className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:border-indigo-600 focus:bg-white text-slate-900 transition"
-                  placeholder="e.g. l.molefe@periscope.co.bw"
+                  className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:border-indigo-600 focus:bg-white text-slate-900 transition font-mono text-[11px]"
+                  placeholder="l.molefe@periscope.co.bw"
                 />
               </div>
 
+              {/* Password Generator Input */}
               <div>
-                <label className="block text-slate-700 font-semibold mb-1">Temporary Password</label>
+                <div className="flex justify-between items-center mb-1">
+                  <label className="block text-slate-700 font-semibold">Temporary Password</label>
+                  <button
+                    type="button"
+                    onClick={generateRandomPassword}
+                    className="text-indigo-600 hover:text-indigo-700 text-[11px] font-bold flex items-center gap-1"
+                  >
+                    <Wand2 className="w-3 h-3" /> Auto-Generate
+                  </button>
+                </div>
                 <div className="relative">
                   <input
-                    type="password"
+                    type="text"
                     required
                     minLength={6}
                     value={formData.password}
                     onChange={(e) => setFormData({ ...formData, password: e.target.value })}
-                    className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:border-indigo-600 focus:bg-white text-slate-900 pr-9 transition"
+                    className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:border-indigo-600 focus:bg-white text-slate-900 pr-9 transition font-mono text-xs"
                     placeholder="••••••••"
                   />
                   <Lock className="w-4 h-4 text-slate-400 absolute right-3 top-2.5 pointer-events-none" />
@@ -497,7 +475,7 @@ export default function UserProvisioningPage() {
                   value={formData.site_location}
                   onChange={(e) => setFormData({ ...formData, site_location: e.target.value })}
                   className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:border-indigo-600 focus:bg-white text-slate-900 transition"
-                  placeholder="e.g. Debete Mine"
+                  placeholder="e.g. Headquarters / Debete Mine"
                 />
               </div>
 
@@ -519,64 +497,6 @@ export default function UserProvisioningPage() {
                 </button>
               </div>
             </form>
-          </div>
-        </div>
-      )}
-
-      {/* Modal 2: Inspect Staff Profile Modal */}
-      {selectedProfile && (
-        <div className="fixed inset-0 z-50 bg-slate-900/40 backdrop-blur-xs flex items-center justify-center p-4">
-          <div className="bg-white border border-slate-200 rounded-2xl w-full max-w-md p-6 space-y-5 shadow-2xl relative animate-in fade-in zoom-in duration-150">
-            <button
-              onClick={() => setSelectedProfile(null)}
-              className="absolute top-4 right-4 p-1.5 text-slate-400 hover:text-slate-700 rounded-lg hover:bg-slate-100 transition"
-            >
-              <X className="w-5 h-5" />
-            </button>
-
-            <div className="flex items-center space-x-3.5">
-              <div className="w-12 h-12 rounded-xl bg-indigo-50 border border-indigo-100 flex items-center justify-center text-indigo-600 font-bold text-lg">
-                <User className="w-6 h-6" />
-              </div>
-              <div>
-                <h3 className="text-base font-bold text-slate-900">
-                  {selectedProfile.first_name} {selectedProfile.last_name}
-                </h3>
-                <span className="text-[10px] font-extrabold px-2.5 py-0.5 rounded-full uppercase bg-indigo-50 text-indigo-700 border border-indigo-100">
-                  {selectedProfile.role}
-                </span>
-              </div>
-            </div>
-
-            <div className="space-y-3 bg-slate-50 p-4 rounded-xl border border-slate-200 text-xs">
-              <div className="flex justify-between py-1.5 border-b border-slate-200">
-                <span className="text-slate-500 font-medium">Employee UUID</span>
-                <span className="font-mono text-slate-800 font-semibold text-[11px] truncate max-w-[180px]">
-                  {selectedProfile.id}
-                </span>
-              </div>
-              <div className="flex justify-between py-1.5 border-b border-slate-200">
-                <span className="text-slate-500 font-medium">Email Address</span>
-                <span className="text-slate-900 font-semibold">{selectedProfile.email}</span>
-              </div>
-              <div className="flex justify-between py-1.5 border-b border-slate-200">
-                <span className="text-slate-500 font-medium">Assigned Location</span>
-                <span className="text-slate-900 font-semibold">{selectedProfile.site_location || 'Headquarters'}</span>
-              </div>
-              <div className="flex justify-between py-1.5">
-                <span className="text-slate-500 font-medium">Provision Date</span>
-                <span className="text-slate-900 font-semibold">
-                  {selectedProfile.created_at ? new Date(selectedProfile.created_at).toLocaleDateString() : 'N/A'}
-                </span>
-              </div>
-            </div>
-
-            <button
-              onClick={() => setSelectedProfile(null)}
-              className="w-full py-2.5 bg-slate-900 hover:bg-slate-800 text-white text-xs font-semibold rounded-xl transition shadow-xs"
-            >
-              Close Record Inspector
-            </button>
           </div>
         </div>
       )}
