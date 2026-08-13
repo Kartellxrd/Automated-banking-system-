@@ -4,7 +4,7 @@ import { useState } from 'react';
 import HRSideNav from '@/components/hr/HRSideNav';
 import HRNavbar from '@/components/hr/HRNavbar';
 import { 
-  FolderUser, 
+  FolderOpen, 
   Search, 
   Plus, 
   FileText, 
@@ -104,7 +104,7 @@ export default function HREmployeesPage() {
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white p-6 rounded-3xl border border-slate-200/80 shadow-xs">
             <div>
               <div className="flex items-center gap-2 text-xs font-extrabold text-indigo-600 uppercase tracking-wider mb-1">
-                <FolderUser className="w-4 h-4" />
+                <FolderOpen className="w-4 h-4" />
                 <span>Personnel Compliance Archive</span>
               </div>
               <h1 className="text-2xl sm:text-3xl font-black text-slate-900 tracking-tight">Employee Files & Documents</h1>
@@ -163,7 +163,7 @@ export default function HREmployeesPage() {
             {filteredDocs.length === 0 ? (
               <div className="p-12 text-center space-y-3">
                 <div className="w-12 h-12 bg-slate-100 rounded-2xl text-slate-400 flex items-center justify-center mx-auto">
-                  <FolderUser className="w-6 h-6" />
+                  <FolderOpen className="w-6 h-6" />
                 </div>
                 <p className="text-slate-600 text-sm font-bold">No documents match your query.</p>
                 <p className="text-slate-400 text-xs">Try clearing search filters or uploading a new document.</p>
@@ -263,9 +263,7 @@ export default function HREmployeesPage() {
         </main>
       </div>
 
-      {/* ========================================================= */}
       {/* DOCUMENT PREVIEW MODAL */}
-      {/* ========================================================= */}
       {previewDoc && (
         <div className="fixed inset-0 z-50 bg-slate-950/70 backdrop-blur-xs flex items-center justify-center p-4 sm:p-6 animate-in fade-in duration-200">
           <div className="bg-white w-full max-w-4xl rounded-3xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh] border border-slate-200">
@@ -329,9 +327,7 @@ export default function HREmployeesPage() {
         </div>
       )}
 
-      {/* ========================================================= */}
       {/* UPLOAD DOCUMENT MODAL */}
-      {/* ========================================================= */}
       {uploadModalOpen && (
         <div className="fixed inset-0 z-50 bg-slate-950/70 backdrop-blur-xs flex items-center justify-center p-4 animate-in fade-in duration-200">
           <div className="bg-white w-full max-w-lg rounded-3xl shadow-2xl p-6 space-y-6 border border-slate-200">

@@ -6,7 +6,7 @@ import { useRouter, usePathname } from 'next/navigation';
 import {
   Building2,
   LayoutDashboard,
-  FolderUser,
+  FolderOpen, // Replaced FolderUser with FolderOpen
   FileSearch,
   ShieldCheck,
   CheckSquare,
@@ -19,38 +19,27 @@ import {
 import { supabase } from '@/lib/supabase';
 
 export default function HRSideNav() {
+  const [isOpen, setIsOpen] = useState(false);
   const router = useRouter();
   const pathname = usePathname();
-  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
-  const handleLogout = async () => {
-    await supabase.auth.signOut();
-    window.location.href = '/login';
-  };
-
-  const handleDashboardClick = (e) => {
-    e.preventDefault();
-    setMobileMenuOpen(false);
-    if (pathname === '/dashboard/hr') {
-      window.location.reload();
-    } else {
-      router.push('/dashboard/hr');
+  const handleSignOut = async () => {
+    if (supabase) {
+      await supabase.auth.signOut();
     }
+    router.push('/login');
   };
 
-  // HR Manager Navigation Items with dedicated Employee Files route
   const navItems = [
     {
-      name: 'HR Overview',
+      name: 'Overview',
       href: '/dashboard/hr',
       icon: LayoutDashboard,
-      onClick: handleDashboardClick,
-      exact: true,
     },
     {
       name: 'Employee Files & Docs',
       href: '/dashboard/hr/employees',
-      icon: FolderUser,
+      icon: FolderOpen, // Replaced FolderUser with FolderOpen
     },
     {
       name: 'Document & Absence Review',
@@ -58,153 +47,110 @@ export default function HRSideNav() {
       icon: FileSearch,
     },
     {
-      name: 'Compliance Matching',
+      name: 'Rate Card Pairing',
       href: '/dashboard/hr/compliance',
       icon: ShieldCheck,
     },
     {
-      name: 'Staging & Payroll Approval',
+      name: 'Payroll Staging Gate',
       href: '/dashboard/hr/staging',
       icon: CheckSquare,
     },
   ];
 
-  const renderNavLinks = () => (
-    <nav className="space-y-2">
-      {navItems.map((item) => {
-        const Icon = item.icon;
-        const isActive = item.exact
-          ? pathname === item.href
-          : pathname.startsWith(item.href);
-
-        const activeClass = isActive
-          ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/25 font-bold'
-          : 'text-slate-600 hover:bg-indigo-50 hover:text-indigo-700 font-medium';
-
-        if (item.onClick) {
-          return (
-            <a
-              key={item.name}
-              href={item.href}
-              onClick={item.onClick}
-              className={`w-full flex items-center justify-between px-4 py-3 rounded-2xl text-sm transition-all duration-200 group active:scale-[0.98] ${activeClass}`}
-            >
-              <div className="flex items-center gap-3.5">
-                <Icon className={`w-5 h-5 transition-transform duration-200 group-hover:scale-110 ${isActive ? 'text-white' : 'text-slate-400 group-hover:text-indigo-600'}`} />
-                <span>{item.name}</span>
-              </div>
-              {isActive && <ChevronRight className="w-4 h-4 text-indigo-200" />}
-            </a>
-          );
-        }
-
-        return (
-          <Link
-            key={item.name}
-            href={item.href}
-            onClick={() => setMobileMenuOpen(false)}
-            className={`w-full flex items-center justify-between px-4 py-3 rounded-2xl text-sm transition-all duration-200 group active:scale-[0.98] ${activeClass}`}
-          >
-            <div className="flex items-center gap-3.5">
-              <Icon className={`w-5 h-5 transition-transform duration-200 group-hover:scale-110 ${isActive ? 'text-white' : 'text-slate-400 group-hover:text-indigo-600'}`} />
-              <span>{item.name}</span>
-            </div>
-            {isActive && <ChevronRight className="w-4 h-4 text-indigo-200" />}
-          </Link>
-        );
-      })}
-    </nav>
-  );
-
   return (
     <>
-      {/* Mobile Sticky Header */}
-      <div className="lg:hidden bg-white border-b border-slate-200 p-4 flex items-center justify-between sticky top-0 z-40 shadow-xs">
-        <div className="flex items-center gap-3">
-          <div className="p-2.5 rounded-2xl bg-indigo-50 border border-indigo-100 text-indigo-600">
-            <UserCheck className="w-5 h-5" />
+      {/* Mobile Top Toggle */}
+      <div className="lg:hidden bg-slate-900 text-white p-4 flex items-center justify-between border-b border-slate-800">
+        <div className="flex items-center gap-2">
+          <div className="p-2 bg-indigo-600 rounded-xl text-white">
+            <Building2 className="w-5 h-5" />
           </div>
-          <div>
-            <span className="font-extrabold text-slate-900 text-sm block leading-tight">Periscope Mining</span>
-            <span className="text-[11px] text-indigo-600 font-bold uppercase tracking-wider">HR & Compliance</span>
-          </div>
+          <span className="font-black text-base tracking-tight">HR Control</span>
         </div>
         <button
-          onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
-          className="p-2.5 text-slate-700 hover:text-indigo-600 bg-slate-100 hover:bg-indigo-50 border border-slate-200 rounded-xl transition active:scale-95 cursor-pointer"
+          onClick={() => setIsOpen(!isOpen)}
+          className="p-2 text-slate-400 hover:text-white rounded-xl hover:bg-slate-800 transition"
         >
-          {mobileMenuOpen ? <X className="w-6 h-6" /> : <Menu className="w-6 h-6" />}
+          {isOpen ? <X className="w-6 h-6" /> : <Menu className="w-6 h-6" />}
         </button>
       </div>
 
-      {/* Mobile Drawer Overlay */}
-      {mobileMenuOpen && (
-        <div className="lg:hidden fixed inset-0 z-50 bg-slate-950/50 backdrop-blur-xs flex">
-          <div className="w-80 bg-white border-r border-slate-200 p-6 flex flex-col justify-between h-full shadow-2xl animate-in slide-in-from-left duration-200">
-            <div className="space-y-6">
-              <div className="flex items-center justify-between border-b border-slate-100 pb-4">
-                <div className="flex items-center gap-3">
-                  <div className="p-3 rounded-2xl bg-indigo-50 border border-indigo-100 text-indigo-600">
-                    <Building2 className="w-6 h-6" />
-                  </div>
-                  <div>
-                    <h1 className="font-black text-slate-900 text-base leading-none">Periscope</h1>
-                    <p className="text-[11px] text-indigo-600 font-bold uppercase tracking-wider mt-1">HR & Compliance</p>
-                  </div>
-                </div>
-                <button
-                  onClick={() => setMobileMenuOpen(false)}
-                  className="p-2 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-xl transition"
-                >
-                  <X className="w-5 h-5" />
-                </button>
-              </div>
-
-              {renderNavLinks()}
-            </div>
-
-            <div className="pt-4 border-t border-slate-100">
-              <button
-                onClick={handleLogout}
-                className="w-full flex items-center gap-3.5 px-4 py-3 rounded-2xl text-sm font-bold text-rose-600 hover:bg-rose-50 transition active:scale-[0.98] cursor-pointer"
-              >
-                <LogOut className="w-5 h-5 text-rose-500" />
-                <span>Sign Out</span>
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Desktop Persistent Sidebar */}
-      <aside className="hidden lg:flex w-72 bg-white border-r border-slate-200 p-6 flex-col justify-between shrink-0 sticky top-0 h-screen shadow-xs">
-        <div className="space-y-6">
-          {/* Brand Header */}
-          <div className="flex items-center gap-3.5 border-b border-slate-100 pb-5">
-            <div className="p-3 rounded-2xl bg-indigo-50 border border-indigo-100 text-indigo-600 shrink-0">
+      {/* Navigation Sidebar */}
+      <aside
+        className={`fixed lg:static inset-y-0 left-0 z-50 w-72 bg-slate-900 text-slate-300 flex flex-col justify-between p-6 transition-transform duration-300 ease-in-out ${
+          isOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'
+        }`}
+      >
+        <div className="space-y-8">
+          {/* Logo Header */}
+          <div className="hidden lg:flex items-center gap-3 px-2">
+            <div className="p-2.5 bg-indigo-600 rounded-2xl text-white shadow-lg shadow-indigo-600/30">
               <Building2 className="w-6 h-6" />
             </div>
             <div>
-              <h1 className="font-black text-slate-900 text-base leading-none">Periscope Mining</h1>
-              <p className="text-[11px] text-indigo-600 font-extrabold uppercase tracking-wider mt-1">HR Control Center</p>
+              <h2 className="font-black text-white text-lg tracking-tight leading-none">Automated Payroll</h2>
+              <span className="text-[10px] font-extrabold text-indigo-400 uppercase tracking-widest">HR & Compliance</span>
             </div>
           </div>
 
           {/* Navigation Links */}
-          {renderNavLinks()}
+          <nav className="space-y-1.5">
+            {navItems.map((item) => {
+              const Icon = item.icon;
+              const isActive = pathname === item.href;
+
+              return (
+                <Link
+                  key={item.name}
+                  href={item.href}
+                  onClick={() => setIsOpen(false)}
+                  className={`flex items-center justify-between px-4 py-3 rounded-2xl font-bold text-sm transition ${
+                    isActive
+                      ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/20'
+                      : 'text-slate-400 hover:text-white hover:bg-slate-800/60'
+                  }`}
+                >
+                  <div className="flex items-center gap-3">
+                    <Icon className="w-5 h-5 shrink-0" />
+                    <span>{item.name}</span>
+                  </div>
+                  {isActive && <ChevronRight className="w-4 h-4 opacity-80" />}
+                </Link>
+              );
+            })}
+          </nav>
         </div>
 
-        {/* Footer / Sign Out */}
-        <div className="pt-4 border-t border-slate-100">
+        {/* Footer Section */}
+        <div className="pt-6 border-t border-slate-800 space-y-4">
+          <div className="flex items-center gap-3 px-2 py-1">
+            <div className="w-9 h-9 rounded-full bg-indigo-950 border border-indigo-700/50 flex items-center justify-center text-indigo-300 font-black text-xs shrink-0">
+              HR
+            </div>
+            <div className="min-w-0 flex-1">
+              <p className="text-xs font-bold text-white truncate">Compliance Admin</p>
+              <p className="text-[10px] text-slate-500 font-semibold truncate">hr@company.com</p>
+            </div>
+          </div>
+
           <button
-            onClick={handleLogout}
-            className="w-full flex items-center gap-3.5 px-4 py-3 rounded-2xl text-sm font-bold text-rose-600 hover:bg-rose-50 transition active:scale-[0.98] cursor-pointer"
+            onClick={handleSignOut}
+            className="w-full flex items-center justify-center gap-2 bg-slate-800/80 hover:bg-rose-500/10 hover:text-rose-400 text-slate-400 font-bold text-xs py-3 rounded-2xl transition border border-slate-700/50 hover:border-rose-500/30"
           >
-            <LogOut className="w-5 h-5 text-rose-500" />
+            <LogOut className="w-4 h-4" />
             <span>Sign Out</span>
           </button>
         </div>
       </aside>
+
+      {/* Mobile Backdrop */}
+      {isOpen && (
+        <div
+          onClick={() => setIsOpen(false)}
+          className="fixed inset-0 bg-slate-950/60 backdrop-blur-xs z-40 lg:hidden"
+        />
+      )}
     </>
   );
 }

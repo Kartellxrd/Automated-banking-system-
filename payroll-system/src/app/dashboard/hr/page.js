@@ -7,7 +7,7 @@ import {
   FileSearch, 
   ShieldCheck, 
   CheckSquare, 
-  FolderUser, 
+  FolderOpen,
   AlertCircle, 
   CheckCircle2, 
   ArrowRight,
@@ -21,7 +21,7 @@ export default function HRDashboardPage() {
     { name: 'Pending Sick Notes', value: '12', change: 'Requires inline review', color: 'bg-amber-500', icon: FileSearch, href: '/dashboard/hr/absences' },
     { name: 'Unmatched Rate Cards', value: '5', change: 'Locked site hours waiting', color: 'bg-indigo-600', icon: ShieldCheck, href: '/dashboard/hr/compliance' },
     { name: 'Ready for Staging', value: '148', change: 'Timesheets verified', color: 'bg-emerald-600', icon: CheckSquare, href: '/dashboard/hr/staging' },
-    { name: 'Expiring IDs / Certs', value: '3', change: 'Requires upload', color: 'bg-rose-500', icon: FolderUser, href: '/dashboard/hr/employees' },
+    { name: 'Expiring IDs / Certs', value: '3', change: 'Requires upload', color: 'bg-rose-500', icon: FolderOpen, href: '/dashboard/hr/employees' },
   ];
 
   const pendingQueue = [
@@ -54,7 +54,7 @@ export default function HRDashboardPage() {
               href="/dashboard/hr/employees"
               className="inline-flex items-center justify-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-sm px-5 py-3 rounded-2xl transition shadow-md shadow-indigo-600/20 active:scale-95 shrink-0"
             >
-              <FolderUser className="w-4 h-4" />
+              <FolderOpen className="w-4 h-4" />
               <span>Manage Employee Files</span>
             </Link>
           </div>
