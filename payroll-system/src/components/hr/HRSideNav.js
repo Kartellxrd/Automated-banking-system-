@@ -6,18 +6,19 @@ import { useRouter, usePathname } from 'next/navigation';
 import {
   Building2,
   LayoutDashboard,
-  QrCode,
-  CalendarCheck,
-  FileText,
+  FolderUser,
+  FileSearch,
+  ShieldCheck,
+  CheckSquare,
   LogOut,
   Menu,
   X,
   ChevronRight,
-  HardHat
+  UserCheck
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 
-export default function SiteClerkSideNav() {
+export default function HRSideNav() {
   const router = useRouter();
   const pathname = usePathname();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
@@ -30,36 +31,41 @@ export default function SiteClerkSideNav() {
   const handleDashboardClick = (e) => {
     e.preventDefault();
     setMobileMenuOpen(false);
-    if (pathname === '/dashboard/site-clerk') {
+    if (pathname === '/dashboard/hr') {
       window.location.reload();
     } else {
-      router.push('/dashboard/site-clerk');
+      router.push('/dashboard/hr');
     }
   };
 
-  // Site Clerk Navigation Items
+  // HR Manager Navigation Items with dedicated Employee Files route
   const navItems = [
     {
-      name: 'Field Operations',
-      href: '/dashboard/site-clerk',
+      name: 'HR Overview',
+      href: '/dashboard/hr',
       icon: LayoutDashboard,
       onClick: handleDashboardClick,
       exact: true,
     },
     {
-      name: 'QR Kiosk Terminal',
-      href: '/dashboard/site-clerk/kiosk',
-      icon: QrCode,
+      name: 'Employee Files & Docs',
+      href: '/dashboard/hr/employees',
+      icon: FolderUser,
     },
     {
-      name: 'Shift Log & Roster',
-      href: '/dashboard/site-clerk/roster',
-      icon: CalendarCheck,
+      name: 'Document & Absence Review',
+      href: '/dashboard/hr/absences',
+      icon: FileSearch,
     },
     {
-      name: 'Medical & Leave Upload',
-      href: '/dashboard/site-clerk/documents',
-      icon: FileText,
+      name: 'Compliance Matching',
+      href: '/dashboard/hr/compliance',
+      icon: ShieldCheck,
+    },
+    {
+      name: 'Staging & Payroll Approval',
+      href: '/dashboard/hr/staging',
+      icon: CheckSquare,
     },
   ];
 
@@ -116,11 +122,11 @@ export default function SiteClerkSideNav() {
       <div className="lg:hidden bg-white border-b border-slate-200 p-4 flex items-center justify-between sticky top-0 z-40 shadow-xs">
         <div className="flex items-center gap-3">
           <div className="p-2.5 rounded-2xl bg-indigo-50 border border-indigo-100 text-indigo-600">
-            <HardHat className="w-5 h-5" />
+            <UserCheck className="w-5 h-5" />
           </div>
           <div>
             <span className="font-extrabold text-slate-900 text-sm block leading-tight">Periscope Mining</span>
-            <span className="text-[11px] text-indigo-600 font-bold uppercase tracking-wider">Site Clerk Portal</span>
+            <span className="text-[11px] text-indigo-600 font-bold uppercase tracking-wider">HR & Compliance</span>
           </div>
         </div>
         <button
@@ -143,7 +149,7 @@ export default function SiteClerkSideNav() {
                   </div>
                   <div>
                     <h1 className="font-black text-slate-900 text-base leading-none">Periscope</h1>
-                    <p className="text-[11px] text-indigo-600 font-bold uppercase tracking-wider mt-1">Field Operations</p>
+                    <p className="text-[11px] text-indigo-600 font-bold uppercase tracking-wider mt-1">HR & Compliance</p>
                   </div>
                 </div>
                 <button
@@ -180,7 +186,7 @@ export default function SiteClerkSideNav() {
             </div>
             <div>
               <h1 className="font-black text-slate-900 text-base leading-none">Periscope Mining</h1>
-              <p className="text-[11px] text-indigo-600 font-extrabold uppercase tracking-wider mt-1">Site Clerk Control</p>
+              <p className="text-[11px] text-indigo-600 font-extrabold uppercase tracking-wider mt-1">HR Control Center</p>
             </div>
           </div>
 
