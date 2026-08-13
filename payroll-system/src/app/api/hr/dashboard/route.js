@@ -10,7 +10,7 @@ export async function GET() {
 
     if (empErr) throw empErr;
 
-    // 2. Fetch pending shift logs safely
+    // 2. Fetch pending shift logs
     const { data: pendingShifts, error: pendingErr } = await supabase
       .from('shift_logs')
       .select('id, overtime_hours, status, created_at, site_location, employee_id')
@@ -19,22 +19,28 @@ export async function GET() {
 
     if (pendingErr) throw pendingErr;
 
-    // 3. Fetch employees associated with these pending shifts
-    const employeeIds = (pendingShifts || []).map((s) => s.employee_id).filter(Boolean);
+    // 3. Extract unique employee IDs and fetch split names
+    const employeeIds = Array.from(
+      new Set((pendingShifts || []).map((s) => s.employee_id).filter(Boolean))
+    );
+
     let employeeMap = {};
 
     if (employeeIds.length > 0) {
-      const { data: empList } = await supabase
+      const { data: empList, error: empListErr } = await supabase
         .from('employees')
-        .select('id, full_name')
+        .select('id, first_name, last_name')
         .in('id', employeeIds);
 
+      if (empListErr) throw empListErr;
+
       (empList || []).forEach((e) => {
-        employeeMap[e.id] = e.full_name;
+        const fullName = `${e.first_name || ''} ${e.last_name || ''}`.trim();
+        employeeMap[e.id] = fullName || 'Unnamed Employee';
       });
     }
 
-    // 4. Staging metrics
+    // 4. Calculate Staging & Readiness Metrics
     const { count: approvedShiftsCount } = await supabase
       .from('shift_logs')
       .select('*', { count: 'exact', head: true })
@@ -44,13 +50,16 @@ export async function GET() {
       .from('shift_logs')
       .select('*', { count: 'exact', head: true });
 
-    const totalShifts = totalShiftsCount || 1;
-    const readinessPercentage = Math.round(((approvedShiftsCount || 0) / totalShifts) * 100) || 0;
+    const totalShifts = totalShiftsCount || 0;
+    const readinessPercentage = totalShifts > 0 
+      ? Math.round(((approvedShiftsCount || 0) / totalShifts) * 100) 
+      : 0;
 
-    // 5. Format Queue
+    // 5. Format Queue for UI Rendering
     const pendingQueue = (pendingShifts || []).map((log) => ({
       id: log.id,
-      worker: employeeMap[log.employee_id] || 'Field Personnel',
+      worker: employeeMap[log.employee_id] || 'Field Employee',
+      full_name: employeeMap[log.employee_id] || 'Field Employee',
       type: log.overtime_hours > 0 ? `Overtime Review (${log.overtime_hours} hrs)` : 'Standard Shift Audit',
       site: log.site_location || 'Main Operational Site',
       status: log.status === 'PENDING' ? 'Pending Review' : log.status,
@@ -76,9 +85,10 @@ export async function GET() {
   } catch (error) {
     console.error('HR Dashboard API Error:', error);
 
-    // Clean Fallback for non-blocking UI render
+    // Fallback response to preserve non-blocking UI state
     return NextResponse.json({
-      success: true,
+      success: false,
+      error: error?.message || 'Database query failed',
       stats: {
         activePersonnel: 0,
         pendingReviews: 0,
@@ -87,6 +97,6 @@ export async function GET() {
         readinessPercentage: 0,
       },
       pendingQueue: [],
-    });
+    }, { status: 500 });
   }
 }

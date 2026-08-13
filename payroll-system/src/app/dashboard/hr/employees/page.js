@@ -17,7 +17,8 @@ import {
 } from 'lucide-react';
 
 const INITIAL_FORM_STATE = {
-  name: '',
+  first_name: '',
+  last_name: '',
   role: '',
   site: '',
   rate: '',
@@ -69,7 +70,7 @@ export default function HREmployeesPage() {
     } catch (err) {
       console.error('Database query error:', err);
       setError(err.message || 'Network error while connecting to database.');
-    } font-medium {
+    } finally {
       setLoading(false);
     }
   };
@@ -82,8 +83,8 @@ export default function HREmployeesPage() {
   const handleCreateEmployee = async (e) => {
     e.preventDefault();
 
-    if (!newEmployee.name.trim() || !newEmployee.site.trim() || !newEmployee.role.trim()) {
-      alert('Please fill in required fields: Name, Role, and Site Location.');
+    if (!newEmployee.first_name.trim() || !newEmployee.last_name.trim() || !newEmployee.site.trim() || !newEmployee.role.trim()) {
+      alert('Please fill in required fields: First Name, Last Name, Role, and Site Location.');
       return;
     }
 
@@ -93,7 +94,8 @@ export default function HREmployeesPage() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          full_name: newEmployee.name,
+          first_name: newEmployee.first_name,
+          last_name: newEmployee.last_name,
           job_title: newEmployee.role,
           site_location: newEmployee.site,
           hourly_rate: parseFloat(newEmployee.rate) || 0.00,
@@ -112,7 +114,7 @@ export default function HREmployeesPage() {
       setAddEmployeeModalOpen(false);
       setNewEmployee(INITIAL_FORM_STATE);
 
-      triggerNotification(`Employee "${newEmployee.name}" registered successfully!`);
+      triggerNotification(`Employee "${newEmployee.first_name} ${newEmployee.last_name}" registered successfully!`);
       await fetchEmployeeData();
     } catch (err) {
       console.error('Submission failed:', err);
@@ -125,13 +127,18 @@ export default function HREmployeesPage() {
   // Dynamic Search Filter based on live fields
   const filteredEmployees = employees.filter((emp) => {
     const query = searchTerm.toLowerCase();
-    const name = emp.full_name || emp.name || '';
+    
+    // Construct full name with fallback for legacy records
+    const fullName = emp.first_name && emp.last_name 
+      ? `${emp.first_name} ${emp.last_name}` 
+      : emp.full_name || emp.name || '';
+
     const role = emp.job_title || emp.role || '';
     const site = emp.site_location || emp.site || '';
     const id = emp.id || '';
 
     return (
-      name.toLowerCase().includes(query) ||
+      fullName.toLowerCase().includes(query) ||
       role.toLowerCase().includes(query) ||
       site.toLowerCase().includes(query) ||
       id.toString().toLowerCase().includes(query)
@@ -262,7 +269,10 @@ export default function HREmployeesPage() {
                     </thead>
                     <tbody className="divide-y divide-slate-100 text-xs font-medium text-slate-700">
                       {filteredEmployees.map((employee) => {
-                        const name = employee.full_name || employee.name || 'Unnamed Employee';
+                        const fullName = employee.first_name && employee.last_name 
+                          ? `${employee.first_name} ${employee.last_name}`
+                          : employee.full_name || employee.name || 'Unnamed Employee';
+
                         const role = employee.job_title || employee.role || 'N/A';
                         const site = employee.site_location || employee.site || 'Unassigned';
                         const rate = employee.hourly_rate ?? employee.rate ?? 0;
@@ -273,10 +283,10 @@ export default function HREmployeesPage() {
                             <td className="py-4 px-6">
                               <div className="flex items-center gap-3">
                                 <div className="w-9 h-9 rounded-xl bg-indigo-100 text-indigo-700 font-bold flex items-center justify-center text-xs shrink-0">
-                                  {name.charAt(0).toUpperCase()}
+                                  {fullName.charAt(0).toUpperCase()}
                                 </div>
                                 <div>
-                                  <span className="font-bold text-slate-900 block leading-tight">{name}</span>
+                                  <span className="font-bold text-slate-900 block leading-tight">{fullName}</span>
                                   <span className="text-[10px] text-slate-400 font-semibold">{nationalId}</span>
                                 </div>
                               </div>
@@ -346,16 +356,29 @@ export default function HREmployeesPage() {
             </div>
 
             <form onSubmit={handleCreateEmployee} className="space-y-4">
-              <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">Full Name *</label>
-                <input
-                  type="text"
-                  required
-                  placeholder="Enter employee full name"
-                  value={newEmployee.name}
-                  onChange={(e) => setNewEmployee({ ...newEmployee, name: e.target.value })}
-                  className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-medium text-slate-900 focus:ring-2 focus:ring-indigo-500 focus:bg-white transition"
-                />
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">First Name *</label>
+                  <input
+                    type="text"
+                    required
+                    placeholder="First Name"
+                    value={newEmployee.first_name}
+                    onChange={(e) => setNewEmployee({ ...newEmployee, first_name: e.target.value })}
+                    className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-medium text-slate-900 focus:ring-2 focus:ring-indigo-500 focus:bg-white transition"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">Last Name *</label>
+                  <input
+                    type="text"
+                    required
+                    placeholder="Last Name"
+                    value={newEmployee.last_name}
+                    onChange={(e) => setNewEmployee({ ...newEmployee, last_name: e.target.value })}
+                    className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-medium text-slate-900 focus:ring-2 focus:ring-indigo-500 focus:bg-white transition"
+                  />
+                </div>
               </div>
 
               <div className="grid grid-cols-2 gap-3">

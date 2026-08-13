@@ -50,10 +50,12 @@ export default function HRDashboardPage() {
   useEffect(() => {
     fetchHrDashboard();
 
-    // Check if redirected from an employee creation or update action
-    const params = new URLSearchParams(window.location.search);
-    if (params.get('created') === 'true') {
-      triggerNotification('Employee profile created successfully!');
+    // Safely check query params client-side for redirect feedback
+    if (typeof window !== 'undefined') {
+      const params = new URLSearchParams(window.location.search);
+      if (params.get('created') === 'true') {
+        triggerNotification('Employee profile created successfully!');
+      }
     }
   }, []);
 
@@ -69,7 +71,19 @@ export default function HRDashboardPage() {
       const json = await res.json();
       if (json.success) {
         triggerNotification('Shift log verified and approved successfully!');
-        await fetchHrDashboard(); // Refresh live database metrics
+        
+        // Optimistically remove item from current pending queue state
+        setData((prev) => prev ? {
+          ...prev,
+          pendingQueue: prev.pendingQueue.filter((q) => q.id !== shiftId),
+          stats: {
+            ...prev.stats,
+            pendingReviews: Math.max(0, (prev.stats?.pendingReviews || 1) - 1),
+          }
+        } : prev);
+
+        // Background refetch for precise sync
+        fetchHrDashboard();
       } else {
         alert(json.message || 'Failed to update shift record in database.');
       }
@@ -115,6 +129,9 @@ export default function HRDashboardPage() {
     },
   ];
 
+  // Helper calculation for bounded percentage display
+  const readinessValue = Math.min(100, Math.max(0, data?.stats?.readinessPercentage ?? 0));
+
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col lg:flex-row font-sans text-slate-900 relative">
       {/* Dynamic Pop-up Notification Toast */}
@@ -125,7 +142,7 @@ export default function HRDashboardPage() {
             <span className="text-xs font-bold">{notification}</span>
             <button 
               onClick={() => setNotification(null)}
-              className="text-emerald-400 hover:text-white transition ml-2"
+              className="text-emerald-400 hover:text-white transition ml-2 cursor-pointer"
             >
               <X className="w-4 h-4" />
             </button>
@@ -216,38 +233,49 @@ export default function HRDashboardPage() {
                   </div>
                 ) : (
                   <div className="divide-y divide-slate-100">
-                    {data.pendingQueue.map((item) => (
-                      <div key={item.id} className="py-4 first:pt-0 last:pb-0 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                        <div className="space-y-1">
-                          <div className="flex items-center gap-2">
-                            <span className="font-bold text-slate-900 text-sm">{item.worker}</span>
-                            <span className="px-2.5 py-0.5 rounded-full text-[10px] font-extrabold bg-amber-50 text-amber-700 border border-amber-200">
-                              {item.status}
-                            </span>
+                    {data.pendingQueue.map((item) => {
+                      // Fallback support for relational DB column naming differences
+                      const workerName = item.worker || item.full_name || item.employee_name || 'Unassigned Staff';
+                      const siteName = item.site || item.site_name || 'Default Site';
+                      const shiftType = item.type || item.shift_type || 'Shift Record';
+                      const shiftDate = item.date || item.shift_date || 'Today';
+                      const statusText = item.status || 'PENDING';
+
+                      return (
+                        <div key={item.id} className="py-4 first:pt-0 last:pb-0 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                          <div className="space-y-1">
+                            <div className="flex items-center gap-2">
+                              <span className="font-bold text-slate-900 text-sm">{workerName}</span>
+                              <span className="px-2.5 py-0.5 rounded-full text-[10px] font-extrabold bg-amber-50 text-amber-700 border border-amber-200 uppercase">
+                                {statusText}
+                              </span>
+                            </div>
+                            <p className="text-xs text-slate-500 font-medium">
+                              {shiftType} • <span className="text-slate-700">{siteName}</span>
+                            </p>
                           </div>
-                          <p className="text-xs text-slate-500 font-medium">{item.type} • <span className="text-slate-700">{item.site}</span></p>
+                          <div className="flex items-center gap-3">
+                            <span className="text-[11px] text-slate-400 font-medium flex items-center gap-1">
+                              <Clock className="w-3.5 h-3.5" />
+                              {shiftDate}
+                            </span>
+                            <button
+                              onClick={() => handleApproveShift(item.id)}
+                              disabled={actioningId === item.id}
+                              className="px-3 py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 text-xs font-bold rounded-xl transition cursor-pointer flex items-center gap-1.5 disabled:opacity-50"
+                            >
+                              {actioningId === item.id ? (
+                                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                              ) : (
+                                <>
+                                  Verify Log <ArrowRight className="w-3.5 h-3.5" />
+                                </>
+                              )}
+                            </button>
+                          </div>
                         </div>
-                        <div className="flex items-center gap-3">
-                          <span className="text-[11px] text-slate-400 font-medium flex items-center gap-1">
-                            <Clock className="w-3.5 h-3.5" />
-                            {item.date}
-                          </span>
-                          <button
-                            onClick={() => handleApproveShift(item.id)}
-                            disabled={actioningId === item.id}
-                            className="px-3 py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 text-xs font-bold rounded-xl transition cursor-pointer flex items-center gap-1.5"
-                          >
-                            {actioningId === item.id ? (
-                              <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                            ) : (
-                              <>
-                                Verify Log <ArrowRight className="w-3.5 h-3.5" />
-                              </>
-                            )}
-                          </button>
-                        </div>
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 )}
               </div>
@@ -268,12 +296,12 @@ export default function HRDashboardPage() {
               <div className="space-y-3 pt-4 border-t border-indigo-800/60">
                 <div className="flex justify-between text-xs font-bold text-indigo-200">
                   <span>Current Period Readiness</span>
-                  <span>{loading ? '...' : `${data?.stats?.readinessPercentage ?? 0}%`}</span>
+                  <span>{loading ? '...' : `${readinessValue}%`}</span>
                 </div>
                 <div className="w-full bg-indigo-950 rounded-full h-2 overflow-hidden border border-indigo-800/50">
                   <div 
                     className="bg-emerald-400 h-full rounded-full transition-all duration-500" 
-                    style={{ width: `${data?.stats?.readinessPercentage ?? 0}%` }}
+                    style={{ width: `${readinessValue}%` }}
                   ></div>
                 </div>
                 <Link
