@@ -1,7 +1,7 @@
 import { createServerClient } from '@supabase/ssr';
 import { NextResponse } from 'next/server';
 
-export async function proxy(request) {
+export async function middleware(request) {
   let response = NextResponse.next({
     request: {
       headers: request.headers,
@@ -76,6 +76,11 @@ export async function proxy(request) {
     }
 
     // Restrict non-admin roles from accessing other department routes
+    if (pathname.startsWith('/dashboard/ceo') && role !== 'ceo') {
+      url.pathname = targetDashboard;
+      return NextResponse.redirect(url);
+    }
+
     if (pathname.startsWith('/dashboard/hr') && role !== 'hr') {
       url.pathname = targetDashboard;
       return NextResponse.redirect(url);
