@@ -3,100 +3,98 @@ import { supabase } from '@/lib/supabase';
 
 export async function GET() {
   try {
-    // 1. Fetch total employees count
-    const { count: totalEmployees, error: empErr } = await supabase
+    // 1. Fetch active employees count
+    const { count: activePersonnel, error: empErr } = await supabase
       .from('employees')
-      .select('*', { count: 'exact', head: true });
+      .select('id', { count: 'exact', head: true })
+      .eq('status', 'ACTIVE');
 
-    if (empErr) throw empErr;
+    if (empErr) console.error('Error fetching employees count:', empErr);
 
-    // 2. Fetch pending shift logs
-    const { data: pendingShifts, error: pendingErr } = await supabase
-      .from('shift_logs')
-      .select('id, overtime_hours, status, created_at, site_location, employee_id')
+    // 2. Fetch pending shift logs with employee join
+    const { data: pendingShifts, error: shiftErr } = await supabase
+      .from('shifts')
+      .select(`
+        id,
+        shift_date,
+        shift_type,
+        status,
+        site_name,
+        employees!left (
+          first_name,
+          last_name,
+          employee_code
+        )
+      `)
       .eq('status', 'PENDING')
-      .order('created_at', { ascending: false });
+      .order('shift_date', { ascending: false })
+      .limit(10);
 
-    if (pendingErr) throw pendingErr;
+    if (shiftErr) console.error('Error fetching pending shifts:', shiftErr);
 
-    // 3. Extract unique employee IDs and fetch split names
-    const employeeIds = Array.from(
-      new Set((pendingShifts || []).map((s) => s.employee_id).filter(Boolean))
-    );
+    // 3. Count total pending reviews
+    const { count: pendingReviewsCount, error: pendingCountErr } = await supabase
+      .from('shifts')
+      .select('id', { count: 'exact', head: true })
+      .eq('status', 'PENDING');
 
-    let employeeMap = {};
+    if (pendingCountErr) console.error('Error counting pending shifts:', pendingCountErr);
 
-    if (employeeIds.length > 0) {
-      const { data: empList, error: empListErr } = await supabase
-        .from('employees')
-        .select('id, first_name, last_name')
-        .in('id', employeeIds);
-
-      if (empListErr) throw empListErr;
-
-      (empList || []).forEach((e) => {
-        const fullName = `${e.first_name || ''} ${e.last_name || ''}`.trim();
-        employeeMap[e.id] = fullName || 'Unnamed Employee';
-      });
-    }
-
-    // 4. Calculate Staging & Readiness Metrics
-    const { count: approvedShiftsCount } = await supabase
-      .from('shift_logs')
-      .select('*', { count: 'exact', head: true })
+    // 4. Count ready for staging timesheets
+    const { count: readyForStaging, error: stagingErr } = await supabase
+      .from('shifts')
+      .select('id', { count: 'exact', head: true })
       .eq('status', 'APPROVED');
 
-    const { count: totalShiftsCount } = await supabase
-      .from('shift_logs')
-      .select('*', { count: 'exact', head: true });
+    if (stagingErr) console.error('Error counting staging shifts:', stagingErr);
 
-    const totalShifts = totalShiftsCount || 0;
+    // 5. Count rate audit alerts (unmatched rates)
+    const { count: unmatchedRates, error: ratesErr } = await supabase
+      .from('employees')
+      .select('id', { count: 'exact', head: true })
+      .or('hourly_rate.is.null,hourly_rate.eq.0');
+
+    if (ratesErr) console.error('Error checking unmatched rates:', ratesErr);
+
+    // Calculate readiness percentage
+    const totalShifts = (pendingReviewsCount || 0) + (readyForStaging || 0);
     const readinessPercentage = totalShifts > 0 
-      ? Math.round(((approvedShiftsCount || 0) / totalShifts) * 100) 
-      : 0;
+      ? Math.round(((readyForStaging || 0) / totalShifts) * 100) 
+      : 100;
 
-    // 5. Format Queue for UI Rendering
-    const pendingQueue = (pendingShifts || []).map((log) => ({
-      id: log.id,
-      worker: employeeMap[log.employee_id] || 'Field Employee',
-      full_name: employeeMap[log.employee_id] || 'Field Employee',
-      type: log.overtime_hours > 0 ? `Overtime Review (${log.overtime_hours} hrs)` : 'Standard Shift Audit',
-      site: log.site_location || 'Main Operational Site',
-      status: log.status === 'PENDING' ? 'Pending Review' : log.status,
-      date: new Date(log.created_at).toLocaleDateString('en-GB', {
-        day: 'numeric',
-        month: 'short',
-        hour: '2-digit',
-        minute: '2-digit',
-      }),
-    }));
+    // Format pending queue items safely
+    const formattedQueue = (pendingShifts || []).map((shift) => {
+      const emp = shift.employees;
+      const workerName = emp 
+        ? `${emp.first_name || ''} ${emp.last_name || ''}`.trim() 
+        : 'Unassigned Staff';
+
+      return {
+        id: shift.id,
+        worker: workerName,
+        site: shift.site_name || 'Main Site',
+        type: shift.shift_type || 'Regular Shift',
+        date: shift.shift_date || 'Today',
+        status: shift.status || 'PENDING',
+      };
+    });
 
     return NextResponse.json({
       success: true,
       stats: {
-        activePersonnel: totalEmployees || 0,
-        pendingReviews: pendingShifts?.length || 0,
-        unmatchedRates: 0,
-        readyForStaging: approvedShiftsCount || 0,
+        activePersonnel: activePersonnel || 0,
+        pendingReviews: pendingReviewsCount || 0,
+        readyForStaging: readyForStaging || 0,
+        unmatchedRates: unmatchedRates || 0,
         readinessPercentage,
       },
-      pendingQueue: pendingQueue.slice(0, 5),
+      pendingQueue: formattedQueue,
     });
   } catch (error) {
-    console.error('HR Dashboard API Error:', error);
-
-    // Fallback response to preserve non-blocking UI state
-    return NextResponse.json({
-      success: false,
-      error: error?.message || 'Database query failed',
-      stats: {
-        activePersonnel: 0,
-        pendingReviews: 0,
-        unmatchedRates: 0,
-        readyForStaging: 0,
-        readinessPercentage: 0,
-      },
-      pendingQueue: [],
-    }, { status: 500 });
+    console.error('HR Dashboard API error:', error);
+    return NextResponse.json(
+      { success: false, message: 'Server error fetching HR metrics.' },
+      { status: 500 }
+    );
   }
 }

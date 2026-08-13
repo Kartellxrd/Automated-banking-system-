@@ -6,15 +6,15 @@ import { useRouter, usePathname } from 'next/navigation';
 import {
   Building2,
   LayoutDashboard,
-  FolderOpen, // Replaced FolderUser with FolderOpen
+  FolderOpen,
   FileSearch,
   ShieldCheck,
   CheckSquare,
+  FileText, // Added for Document Docket
   LogOut,
   Menu,
   X,
   ChevronRight,
-  UserCheck
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 
@@ -37,9 +37,14 @@ export default function HRSideNav() {
       icon: LayoutDashboard,
     },
     {
-      name: 'Employee Files & Docs',
+      name: 'Personnel Roster',
       href: '/dashboard/hr/employees',
-      icon: FolderOpen, // Replaced FolderUser with FolderOpen
+      icon: FolderOpen,
+    },
+    {
+      name: 'Document Docket & Vault',
+      href: '/dashboard/hr/documents',
+      icon: FileText,
     },
     {
       name: 'Document & Absence Review',

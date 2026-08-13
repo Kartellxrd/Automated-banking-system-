@@ -24,7 +24,6 @@ export default function HRDashboardPage() {
   const [actioningId, setActioningId] = useState(null);
   const [notification, setNotification] = useState(null);
 
-  // Helper to trigger success notifications
   const triggerNotification = (message) => {
     setNotification(message);
     setTimeout(() => {
@@ -32,7 +31,6 @@ export default function HRDashboardPage() {
     }, 4000);
   };
 
-  // Fetch real-time DB metrics for HR
   const fetchHrDashboard = async () => {
     try {
       const res = await fetch('/api/hr/dashboard');
@@ -50,7 +48,6 @@ export default function HRDashboardPage() {
   useEffect(() => {
     fetchHrDashboard();
 
-    // Safely check query params client-side for redirect feedback
     if (typeof window !== 'undefined') {
       const params = new URLSearchParams(window.location.search);
       if (params.get('created') === 'true') {
@@ -59,7 +56,6 @@ export default function HRDashboardPage() {
     }
   }, []);
 
-  // Quick action handler to approve a pending shift directly from HR control panel
   const handleApproveShift = async (shiftId) => {
     setActioningId(shiftId);
     try {
@@ -72,17 +68,17 @@ export default function HRDashboardPage() {
       if (json.success) {
         triggerNotification('Shift log verified and approved successfully!');
         
-        // Optimistically remove item from current pending queue state
+        // Optimistically update queue state and metrics
         setData((prev) => prev ? {
           ...prev,
           pendingQueue: prev.pendingQueue.filter((q) => q.id !== shiftId),
           stats: {
             ...prev.stats,
             pendingReviews: Math.max(0, (prev.stats?.pendingReviews || 1) - 1),
+            readyForStaging: (prev.stats?.readyForStaging || 0) + 1,
           }
         } : prev);
 
-        // Background refetch for precise sync
         fetchHrDashboard();
       } else {
         alert(json.message || 'Failed to update shift record in database.');
@@ -129,12 +125,10 @@ export default function HRDashboardPage() {
     },
   ];
 
-  // Helper calculation for bounded percentage display
   const readinessValue = Math.min(100, Math.max(0, data?.stats?.readinessPercentage ?? 0));
 
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col lg:flex-row font-sans text-slate-900 relative">
-      {/* Dynamic Pop-up Notification Toast */}
       {notification && (
         <div className="fixed top-5 right-5 z-50 animate-in fade-in slide-in-from-top-4 duration-300">
           <div className="bg-emerald-900 text-emerald-100 border border-emerald-700 px-5 py-3.5 rounded-2xl shadow-2xl flex items-center gap-3">
@@ -150,15 +144,12 @@ export default function HRDashboardPage() {
         </div>
       )}
 
-      {/* HR Side Navigation */}
       <HRSideNav />
 
-      {/* Main Content Area */}
       <div className="flex-1 flex flex-col min-w-0">
         <HRNavbar />
 
         <main className="p-4 sm:p-6 lg:p-8 space-y-8 max-w-7xl mx-auto w-full">
-          {/* Header Banner */}
           <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-white p-6 rounded-3xl border border-slate-200/80 shadow-xs">
             <div>
               <div className="flex items-center gap-2 text-xs font-extrabold text-indigo-600 uppercase tracking-wider mb-1">
@@ -179,7 +170,6 @@ export default function HRDashboardPage() {
             </Link>
           </div>
 
-          {/* Metric Cards Grid */}
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
             {statsList.map((stat) => {
               const Icon = stat.icon;
@@ -208,9 +198,7 @@ export default function HRDashboardPage() {
             })}
           </div>
 
-          {/* Workflow Modules Overview */}
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-            {/* Immediate Action Queue */}
             <div className="lg:col-span-2 space-y-6">
               <div className="bg-white p-6 rounded-3xl border border-slate-200/80 shadow-xs space-y-4">
                 <div className="flex items-center justify-between">
@@ -233,55 +221,45 @@ export default function HRDashboardPage() {
                   </div>
                 ) : (
                   <div className="divide-y divide-slate-100">
-                    {data.pendingQueue.map((item) => {
-                      // Fallback support for relational DB column naming differences
-                      const workerName = item.worker || item.full_name || item.employee_name || 'Unassigned Staff';
-                      const siteName = item.site || item.site_name || 'Default Site';
-                      const shiftType = item.type || item.shift_type || 'Shift Record';
-                      const shiftDate = item.date || item.shift_date || 'Today';
-                      const statusText = item.status || 'PENDING';
-
-                      return (
-                        <div key={item.id} className="py-4 first:pt-0 last:pb-0 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                          <div className="space-y-1">
-                            <div className="flex items-center gap-2">
-                              <span className="font-bold text-slate-900 text-sm">{workerName}</span>
-                              <span className="px-2.5 py-0.5 rounded-full text-[10px] font-extrabold bg-amber-50 text-amber-700 border border-amber-200 uppercase">
-                                {statusText}
-                              </span>
-                            </div>
-                            <p className="text-xs text-slate-500 font-medium">
-                              {shiftType} • <span className="text-slate-700">{siteName}</span>
-                            </p>
-                          </div>
-                          <div className="flex items-center gap-3">
-                            <span className="text-[11px] text-slate-400 font-medium flex items-center gap-1">
-                              <Clock className="w-3.5 h-3.5" />
-                              {shiftDate}
+                    {data.pendingQueue.map((item) => (
+                      <div key={item.id} className="py-4 first:pt-0 last:pb-0 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                        <div className="space-y-1">
+                          <div className="flex items-center gap-2">
+                            <span className="font-bold text-slate-900 text-sm">{item.worker}</span>
+                            <span className="px-2.5 py-0.5 rounded-full text-[10px] font-extrabold bg-amber-50 text-amber-700 border border-amber-200 uppercase">
+                              {item.status}
                             </span>
-                            <button
-                              onClick={() => handleApproveShift(item.id)}
-                              disabled={actioningId === item.id}
-                              className="px-3 py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 text-xs font-bold rounded-xl transition cursor-pointer flex items-center gap-1.5 disabled:opacity-50"
-                            >
-                              {actioningId === item.id ? (
-                                <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                              ) : (
-                                <>
-                                  Verify Log <ArrowRight className="w-3.5 h-3.5" />
-                                </>
-                              )}
-                            </button>
                           </div>
+                          <p className="text-xs text-slate-500 font-medium">
+                            {item.type} • <span className="text-slate-700">{item.site}</span>
+                          </p>
                         </div>
-                      );
-                    })}
+                        <div className="flex items-center gap-3">
+                          <span className="text-[11px] text-slate-400 font-medium flex items-center gap-1">
+                            <Clock className="w-3.5 h-3.5" />
+                            {item.date}
+                          </span>
+                          <button
+                            onClick={() => handleApproveShift(item.id)}
+                            disabled={actioningId === item.id}
+                            className="px-3 py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 text-xs font-bold rounded-xl transition cursor-pointer flex items-center gap-1.5 disabled:opacity-50"
+                          >
+                            {actioningId === item.id ? (
+                              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                            ) : (
+                              <>
+                                Verify Log <ArrowRight className="w-3.5 h-3.5" />
+                              </>
+                            )}
+                          </button>
+                        </div>
+                      </div>
+                    ))}
                   </div>
                 )}
               </div>
             </div>
 
-            {/* Stage Status Summary Card */}
             <div className="bg-gradient-to-br from-indigo-900 to-slate-900 text-white p-6 rounded-3xl shadow-xl flex flex-col justify-between space-y-6">
               <div className="space-y-3">
                 <div className="p-3 bg-indigo-500/20 border border-indigo-400/30 rounded-2xl w-fit text-indigo-300">
