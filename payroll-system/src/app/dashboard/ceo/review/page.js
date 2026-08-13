@@ -28,6 +28,7 @@ export default function CeoBatchAuthorizationPage() {
       stagedAt: 'Today at 08:30 AM',
       overtimeVariance: '+17.07%',
       status: 'PENDING',
+      receipt: null,
     },
     {
       id: 'STG-B202',
@@ -39,6 +40,7 @@ export default function CeoBatchAuthorizationPage() {
       stagedAt: 'Today at 09:15 AM',
       overtimeVariance: '+7.5%',
       status: 'PENDING',
+      receipt: null,
     },
   ]);
 
@@ -71,12 +73,16 @@ export default function CeoBatchAuthorizationPage() {
       const json = await res.json();
 
       if (json.success) {
-        // Update batch state to RELEASED
+        // Update batch state to RELEASED and store its generated receipt
         setBatches((prev) =>
-          prev.map((b) => (b.id === selectedBatch.id ? { ...b, status: 'RELEASED' } : b))
+          prev.map((b) =>
+            b.id === selectedBatch.id
+              ? { ...b, status: 'RELEASED', receipt: json.receipt }
+              : b
+          )
         );
         
-        // Save the receipt returned by Flutterwave
+        // Open receipt modal immediately
         setReceiptData(json.receipt);
         setSelectedBatch(null);
         setPin('');
@@ -164,10 +170,7 @@ export default function CeoBatchAuthorizationPage() {
 
                   {b.status === 'RELEASED' ? (
                     <button
-                      onClick={() => {
-                        // Re-open receipt view if already released
-                        if (receiptData) setReceiptData(receiptData);
-                      }}
+                      onClick={() => setReceiptData(b.receipt)}
                       className="px-5 py-2.5 bg-emerald-50 border border-emerald-200 text-emerald-700 font-extrabold text-xs rounded-xl flex items-center gap-1.5 cursor-pointer hover:bg-emerald-100 transition"
                     >
                       <CheckCircle2 className="w-4 h-4 text-emerald-600" /> View Receipt
@@ -207,7 +210,7 @@ export default function CeoBatchAuthorizationPage() {
                   </button>
                 </div>
 
-                <div className="space-y-3 bg-slate-50 p-4 rounded-2xl text-xs space-y-2">
+                <div className="space-y-3 bg-slate-50 p-4 rounded-2xl text-xs">
                   <div className="flex justify-between text-slate-600">
                     <span>Batch Name:</span>
                     <span className="font-bold text-slate-900">{selectedBatch.batchName}</span>
@@ -332,7 +335,7 @@ export default function CeoBatchAuthorizationPage() {
                   <div className="flex justify-between pt-1 text-sm font-sans">
                     <span className="font-extrabold text-slate-900">Total Released:</span>
                     <span className="font-black text-emerald-700 text-base">
-                      BWP {receiptData.amount.toLocaleString('en-BW', { minimumFractionDigits: 2 })}
+                      BWP {receiptData.amount?.toLocaleString('en-BW', { minimumFractionDigits: 2 })}
                     </span>
                   </div>
                 </div>
