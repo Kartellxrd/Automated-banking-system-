@@ -9,30 +9,16 @@ import {
   Plus, 
   Search, 
   X, 
-  CheckCircle2, 
-  UploadCloud,
-  User,
-  UserPlus,
   Loader2,
-  Building2,
-  AlertCircle
+  Edit3,
+  FileText,
+  ExternalLink,
+  Smartphone,
+  Banknote,
+  CreditCard
 } from 'lucide-react';
 
-const INITIAL_FORM_STATE = {
-  first_name: '',
-  last_name: '',
-  role: '',
-  site: '',
-  rate: '',
-  nationalId: '',
-  bankName: '',
-  accountNumber: '',
-};
-
 export default function HREmployeesPage() {
-  const [searchTerm, setSearchTerm] = useState('');
-  const [activeTab, setActiveTab] = useState('employees'); // 'employees' | 'documents'
-
   // Dynamic DB State
   const [employees, setEmployees] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -45,7 +31,6 @@ export default function HREmployeesPage() {
 
   const fetchEmployees = async () => {
     try {
-      // FIX: Changed endpoint from /api/employees to /api/hr/employees
       const res = await fetch('/api/hr/employees');
       
       if (!res.ok) {
@@ -71,20 +56,20 @@ export default function HREmployeesPage() {
     e.preventDefault();
     setSaving(true);
     try {
-      // FIX: Changed endpoint to /api/hr/employees
       const res = await fetch('/api/hr/employees', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          firstName: newEmployee.first_name,
-          lastName: newEmployee.last_name,
-          contractType: newEmployee.role || 'CASUAL',
-          siteId: newEmployee.site || null,
+          id: editingEmp.id,
+          firstName: editingEmp.first_name,
+          lastName: editingEmp.last_name,
+          contractType: editingEmp.role || 'CASUAL',
+          siteId: editingEmp.site || null,
           payRateType: 'HOURLY',
-          rate: parseFloat(newEmployee.rate) || 0.00,
-          nationalId: newEmployee.nationalId,
-          bankName: newEmployee.bankName,
-          accountNumber: newEmployee.accountNumber,
+          rate: parseFloat(editingEmp.rate) || 0.00,
+          nationalId: editingEmp.nationalId,
+          bankName: editingEmp.bankName,
+          accountNumber: editingEmp.accountNumber,
         }),
       });
 
@@ -105,9 +90,9 @@ export default function HREmployeesPage() {
   const filteredEmployees = employees.filter((emp) => {
     const q = search.toLowerCase();
     return (
-      emp.name.toLowerCase().includes(q) ||
-      emp.role.toLowerCase().includes(q) ||
-      emp.site.toLowerCase().includes(q) ||
+      (emp.name && emp.name.toLowerCase().includes(q)) ||
+      (emp.role && emp.role.toLowerCase().includes(q)) ||
+      (emp.site && emp.site.toLowerCase().includes(q)) ||
       (emp.employee_code && emp.employee_code.toLowerCase().includes(q))
     );
   });
@@ -317,7 +302,7 @@ export default function HREmployeesPage() {
                   <label className="text-xs font-bold text-slate-600">First Name</label>
                   <input
                     type="text"
-                    value={editingEmp.first_name}
+                    value={editingEmp.first_name || ''}
                     onChange={(e) => setEditingEmp({ ...editingEmp, first_name: e.target.value })}
                     className="w-full mt-1 p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-medium focus:ring-2 focus:ring-indigo-500/20"
                     required
@@ -327,7 +312,7 @@ export default function HREmployeesPage() {
                   <label className="text-xs font-bold text-slate-600">Last Name</label>
                   <input
                     type="text"
-                    value={editingEmp.last_name}
+                    value={editingEmp.last_name || ''}
                     onChange={(e) => setEditingEmp({ ...editingEmp, last_name: e.target.value })}
                     className="w-full mt-1 p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-medium focus:ring-2 focus:ring-indigo-500/20"
                     required
@@ -340,7 +325,7 @@ export default function HREmployeesPage() {
                   <label className="text-xs font-bold text-slate-600">Job Title</label>
                   <input
                     type="text"
-                    value={editingEmp.role}
+                    value={editingEmp.role || ''}
                     onChange={(e) => setEditingEmp({ ...editingEmp, role: e.target.value })}
                     className="w-full mt-1 p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-medium focus:ring-2 focus:ring-indigo-500/20"
                     required
@@ -351,7 +336,7 @@ export default function HREmployeesPage() {
                   <input
                     type="number"
                     step="0.01"
-                    value={editingEmp.rate}
+                    value={editingEmp.rate || ''}
                     onChange={(e) => setEditingEmp({ ...editingEmp, rate: e.target.value })}
                     className="w-full mt-1 p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-medium focus:ring-2 focus:ring-indigo-500/20"
                     required
@@ -365,8 +350,8 @@ export default function HREmployeesPage() {
                   <input
                     type="text"
                     placeholder="Banking Institution"
-                    value={newEmployee.bankName}
-                    onChange={(e) => setNewEmployee({ ...newEmployee, bankName: e.target.value })}
+                    value={editingEmp.bankName || ''}
+                    onChange={(e) => setEditingEmp({ ...editingEmp, bankName: e.target.value })}
                     className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-medium text-slate-900 focus:ring-2 focus:ring-indigo-500 focus:bg-white transition"
                   />
                 </div>
@@ -375,8 +360,8 @@ export default function HREmployeesPage() {
                   <input
                     type="text"
                     placeholder="Bank Account Number"
-                    value={newEmployee.accountNumber}
-                    onChange={(e) => setNewEmployee({ ...newEmployee, accountNumber: e.target.value })}
+                    value={editingEmp.accountNumber || ''}
+                    onChange={(e) => setEditingEmp({ ...editingEmp, accountNumber: e.target.value })}
                     className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-medium text-slate-900 focus:ring-2 focus:ring-indigo-500 focus:bg-white transition"
                   />
                 </div>
