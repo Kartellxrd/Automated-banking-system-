@@ -8,17 +8,32 @@ import {
   Users, 
   Plus, 
   Search, 
-  CreditCard, 
-  Smartphone, 
-  Banknote, 
-  FileText, 
-  Edit3, 
-  Loader2, 
-  ExternalLink,
-  X 
+  X, 
+  CheckCircle2, 
+  UploadCloud,
+  User,
+  UserPlus,
+  Loader2,
+  Building2,
+  AlertCircle
 } from 'lucide-react';
 
-export default function EmployeeDirectoryPage() {
+const INITIAL_FORM_STATE = {
+  first_name: '',
+  last_name: '',
+  role: '',
+  site: '',
+  rate: '',
+  nationalId: '',
+  bankName: '',
+  accountNumber: '',
+};
+
+export default function HREmployeesPage() {
+  const [searchTerm, setSearchTerm] = useState('');
+  const [activeTab, setActiveTab] = useState('employees'); // 'employees' | 'documents'
+
+  // Dynamic DB State
   const [employees, setEmployees] = useState([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
@@ -60,12 +75,18 @@ export default function EmployeeDirectoryPage() {
       const res = await fetch('/api/hr/employees', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(editingEmp),
+        body: JSON.stringify({
+          firstName: newEmployee.first_name,
+          lastName: newEmployee.last_name,
+          contractType: newEmployee.role || 'CASUAL',
+          siteId: newEmployee.site || null,
+          payRateType: 'HOURLY',
+          rate: parseFloat(newEmployee.rate) || 0.00,
+          nationalId: newEmployee.nationalId,
+          bankName: newEmployee.bankName,
+          accountNumber: newEmployee.accountNumber,
+        }),
       });
-
-      if (!res.ok) {
-        throw new Error(`Server error: ${res.status}`);
-      }
 
       const json = await res.json();
       if (json.success) {
@@ -338,17 +359,27 @@ export default function EmployeeDirectoryPage() {
                 </div>
               </div>
 
-              <div>
-                <label className="text-xs font-bold text-slate-600">Payment Channel</label>
-                <select
-                  value={editingEmp.paymentChannel}
-                  onChange={(e) => setEditingEmp({ ...editingEmp, paymentChannel: e.target.value })}
-                  className="w-full mt-1 p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-800 focus:ring-2 focus:ring-indigo-500/20"
-                >
-                  <option value="EFT">Bank EFT Transfer</option>
-                  <option value="MOBILE_MONEY">Mobile Money Transfer</option>
-                  <option value="CASH">Cash Disbursement</option>
-                </select>
+              <div className="grid grid-cols-2 gap-3 pt-2 border-t border-slate-100">
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">Bank Name</label>
+                  <input
+                    type="text"
+                    placeholder="Banking Institution"
+                    value={newEmployee.bankName}
+                    onChange={(e) => setNewEmployee({ ...newEmployee, bankName: e.target.value })}
+                    className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-medium text-slate-900 focus:ring-2 focus:ring-indigo-500 focus:bg-white transition"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">Account Number</label>
+                  <input
+                    type="text"
+                    placeholder="Bank Account Number"
+                    value={newEmployee.accountNumber}
+                    onChange={(e) => setNewEmployee({ ...newEmployee, accountNumber: e.target.value })}
+                    className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-medium text-slate-900 focus:ring-2 focus:ring-indigo-500 focus:bg-white transition"
+                  />
+                </div>
               </div>
 
               <div className="flex items-center justify-end gap-2 pt-4 border-t border-slate-100">
