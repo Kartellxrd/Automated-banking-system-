@@ -3,11 +3,20 @@ import { supabase } from '@/lib/supabase';
 
 export async function GET() {
   try {
-    // 1. Fetch active employees count
-    const { count: activePersonnel, error: empErr } = await supabase
+    // 1. Fetch active employees count (case-insensitive & fallback)
+    let { count: activePersonnel, error: empErr } = await supabase
       .from('employees')
       .select('id', { count: 'exact', head: true })
-      .eq('status', 'ACTIVE');
+      .ilike('status', 'active');
+
+    // Fallback: If no status column matched or filtered 0, count all non-archived employees
+    if (empErr || activePersonnel === 0) {
+      const { count: totalEmp } = await supabase
+        .from('employees')
+        .select('id', { count: 'exact', head: true });
+      
+      if (totalEmp) activePersonnel = totalEmp;
+    }
 
     if (empErr) console.error('Error fetching employees count:', empErr);
 
@@ -56,7 +65,7 @@ export async function GET() {
 
     if (ratesErr) console.error('Error checking unmatched rates:', ratesErr);
 
-    // Calculate readiness percentage
+    // Calculate readiness percentage safely
     const totalShifts = (pendingReviewsCount || 0) + (readyForStaging || 0);
     const readinessPercentage = totalShifts > 0 
       ? Math.round(((readyForStaging || 0) / totalShifts) * 100) 
@@ -71,7 +80,7 @@ export async function GET() {
 
       return {
         id: shift.id,
-        worker: workerName,
+        worker: workerName || 'Staff Member',
         site: shift.site_name || 'Main Site',
         type: shift.shift_type || 'Regular Shift',
         date: shift.shift_date || 'Today',

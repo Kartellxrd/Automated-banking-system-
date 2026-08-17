@@ -1,6 +1,7 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
+import { supabase } from '@/lib/supabase';
 import HRSideNav from '@/components/hr/HRSideNav';
 import HRNavbar from '@/components/hr/HRNavbar';
 import { 
@@ -13,111 +14,103 @@ import {
   XCircle, 
   Clock, 
   FileText, 
-  ShieldCheck, 
   User, 
-  Building2,
   Calendar,
-  AlertCircle
+  AlertCircle,
+  Loader2
 } from 'lucide-react';
 
 export default function HRAbsenceReviewPage() {
+  const [submissions, setSubmissions] = useState([]);
+  const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedStatus, setSelectedStatus] = useState('Pending');
   const [activeDoc, setActiveDoc] = useState(null);
+  const [showRejectInput, setShowRejectInput] = useState(false);
   const [rejectionReason, setRejectionReason] = useState('');
-
-  // Mock Absence & Medical Submissions Data
-  const [submissions, setSubmissions] = useState([
-    {
-      id: 'ABS-501',
-      workerName: 'Kago Phuthego',
-      workerId: 'EMP-8802',
-      site: 'Jwaneng Pit B',
-      absenceType: 'Sick Leave / Medical Note',
-      submittedDate: '2026-08-12',
-      startDate: '2026-08-12',
-      endDate: '2026-08-14',
-      status: 'Pending',
-      doctorName: 'Dr. M. Tau (Gaborone Private Hospital)',
-      fileName: 'medical_cert_kago.pdf',
-      fileUrl: 'https://images.unsplash.com/photo-1584515979956-d9f6e5d09982?auto=format&fit=crop&q=80&w=800',
-      notes: 'Patient diagnosed with severe acute respiratory infection; advised 3 days off shift.',
-    },
-    {
-      id: 'ABS-502',
-      workerName: 'Thabo Mokoena',
-      workerId: 'EMP-4105',
-      site: 'Orapa Shaft 3',
-      absenceType: 'Unplanned Emergency Leave',
-      submittedDate: '2026-08-11',
-      startDate: '2026-08-11',
-      endDate: '2026-08-11',
-      status: 'Pending',
-      doctorName: 'N/A (Personal Emergency)',
-      fileName: 'emergency_letter_thabo.png',
-      fileUrl: 'https://images.unsplash.com/photo-1554224155-8d04cb21cd6c?auto=format&fit=crop&q=80&w=800',
-      notes: 'Family emergency, requested 1 shift absence.',
-    },
-    {
-      id: 'ABS-503',
-      workerName: 'Kabelo Sechele',
-      workerId: 'EMP-2901',
-      site: 'Karowe Diamond Mine',
-      absenceType: 'Occupational Injury Note',
-      submittedDate: '2026-08-09',
-      startDate: '2026-08-09',
-      endDate: '2026-08-16',
-      status: 'Approved',
-      doctorName: 'Dr. O. Kgosi (Mine Clinic)',
-      fileName: 'mine_injury_report.pdf',
-      fileUrl: 'https://images.unsplash.com/photo-1568602471122-7832951cc4c5?auto=format&fit=crop&q=80&w=800',
-      notes: 'Ankle sprain during pit inspection; cleared for light duty post-recovery.',
-    },
-    {
-      id: 'ABS-504',
-      workerName: 'Lindiwe Dlamini',
-      workerId: 'EMP-6043',
-      site: 'Jwaneng Plant 1',
-      absenceType: 'Medical Sick Note',
-      submittedDate: '2026-08-08',
-      startDate: '2026-08-08',
-      endDate: '2026-08-09',
-      status: 'Rejected',
-      doctorName: 'Unverified Clinic Stamp',
-      fileName: 'clinic_receipt_unclear.png',
-      fileUrl: 'https://images.unsplash.com/photo-1450133064473-71024230f91b?auto=format&fit=crop&q=80&w=800',
-      notes: 'Invalid medical stamp, signature missing.',
-    },
-  ]);
+  const [actionLoading, setActionLoading] = useState(false);
 
   // Status Filter Tabs
   const statusTabs = ['Pending', 'Approved', 'Rejected', 'All'];
 
-  // Approval Handler
-  const handleApprove = (id) => {
-    setSubmissions((prev) =>
-      prev.map((item) => (item.id === id ? { ...item, status: 'Approved' } : item))
-    );
-    setActiveDoc(null);
+  // 1. Fetch Submissions from Supabase
+  const fetchSubmissions = async () => {
+    setLoading(true);
+    const { data, error } = await supabase
+      .from('absence_records')
+      .select('*')
+      .order('submitted_date', { ascending: false });
+
+    if (error) {
+      console.error('Error fetching absence records:', error.message);
+    } else if (data) {
+      setSubmissions(data);
+    }
+    setLoading(false);
   };
 
-  // Rejection Handler
-  const handleReject = (id) => {
-    setSubmissions((prev) =>
-      prev.map((item) => (item.id === id ? { ...item, status: 'Rejected' } : item))
-    );
+  useEffect(() => {
+    fetchSubmissions();
+  }, []);
+
+  // Modal Close Handler
+  const closeModal = () => {
     setActiveDoc(null);
+    setShowRejectInput(false);
     setRejectionReason('');
+  };
+
+  // 2. Approve Submission in Supabase
+  const handleApprove = async (id) => {
+    setActionLoading(true);
+    const { error } = await supabase
+      .from('absence_records')
+      .update({ status: 'Approved', rejection_reason: null })
+      .eq('id', id);
+
+    if (error) {
+      console.error('Failed to approve record:', error.message);
+    } else {
+      setSubmissions((prev) =>
+        prev.map((item) => (item.id === id ? { ...item, status: 'Approved', rejection_reason: null } : item))
+      );
+      closeModal();
+    }
+    setActionLoading(false);
+  };
+
+  // 3. Reject Submission in Supabase
+  const handleConfirmReject = async (id) => {
+    if (!rejectionReason.trim()) return;
+    setActionLoading(true);
+
+    const { error } = await supabase
+      .from('absence_records')
+      .update({ status: 'Rejected', rejection_reason: rejectionReason.trim() })
+      .eq('id', id);
+
+    if (error) {
+      console.error('Failed to reject record:', error.message);
+    } else {
+      setSubmissions((prev) =>
+        prev.map((item) =>
+          item.id === id ? { ...item, status: 'Rejected', rejection_reason: rejectionReason.trim() } : item
+        )
+      );
+      closeModal();
+    }
+    setActionLoading(false);
   };
 
   // Filter Logic
   const filteredSubmissions = submissions.filter((sub) => {
     const matchesStatus = selectedStatus === 'All' || sub.status === selectedStatus;
+    const searchLower = searchTerm.toLowerCase();
     const matchesSearch =
-      sub.workerName.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      sub.workerId.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      sub.site.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      sub.absenceType.toLowerCase().includes(searchTerm.toLowerCase());
+      (sub.worker_name || '').toLowerCase().includes(searchLower) ||
+      (sub.worker_id || '').toLowerCase().includes(searchLower) ||
+      (sub.site || '').toLowerCase().includes(searchLower) ||
+      (sub.absence_type || '').toLowerCase().includes(searchLower);
     return matchesStatus && matchesSearch;
   });
 
@@ -188,7 +181,12 @@ export default function HRAbsenceReviewPage() {
               </h2>
             </div>
 
-            {filteredSubmissions.length === 0 ? (
+            {loading ? (
+              <div className="p-12 text-center flex flex-col items-center justify-center space-y-3">
+                <Loader2 className="w-8 h-8 text-indigo-600 animate-spin" />
+                <p className="text-slate-500 text-xs font-semibold">Fetching records from Supabase...</p>
+              </div>
+            ) : filteredSubmissions.length === 0 ? (
               <div className="p-12 text-center space-y-3">
                 <div className="w-12 h-12 bg-slate-100 rounded-2xl text-slate-400 flex items-center justify-center mx-auto">
                   <FileSearch className="w-6 h-6" />
@@ -219,28 +217,28 @@ export default function HRAbsenceReviewPage() {
                               <User className="w-4 h-4" />
                             </div>
                             <div>
-                              <span className="font-bold text-slate-900 block leading-tight">{sub.workerName}</span>
-                              <span className="text-[10px] text-slate-400 font-semibold">{sub.workerId} • {sub.site}</span>
+                              <span className="font-bold text-slate-900 block leading-tight">{sub.worker_name}</span>
+                              <span className="text-[10px] text-slate-400 font-semibold">{sub.worker_id} • {sub.site}</span>
                             </div>
                           </div>
                         </td>
 
                         {/* Absence Type */}
                         <td className="py-4 px-6">
-                          <span className="font-bold text-slate-800">{sub.absenceType}</span>
+                          <span className="font-bold text-slate-800">{sub.absence_type}</span>
                         </td>
 
                         {/* Duration */}
                         <td className="py-4 px-6">
                           <div className="flex items-center gap-1.5 text-slate-600 font-semibold">
                             <Calendar className="w-3.5 h-3.5 text-slate-400" />
-                            <span>{sub.startDate} to {sub.endDate}</span>
+                            <span>{sub.start_date} to {sub.end_date}</span>
                           </div>
                         </td>
 
                         {/* Submitted Date */}
                         <td className="py-4 px-6 text-slate-500 font-semibold">
-                          {sub.submittedDate}
+                          {sub.submitted_date}
                         </td>
 
                         {/* Status */}
@@ -268,7 +266,10 @@ export default function HRAbsenceReviewPage() {
                         {/* Review Action */}
                         <td className="py-4 px-6 text-right">
                           <button
-                            onClick={() => setActiveDoc(sub)}
+                            onClick={() => {
+                              setActiveDoc(sub);
+                              setShowRejectInput(false);
+                            }}
                             className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold transition shadow-xs cursor-pointer"
                           >
                             <Eye className="w-3.5 h-3.5" />
@@ -298,14 +299,14 @@ export default function HRAbsenceReviewPage() {
                   <FileSearch className="w-5 h-5" />
                 </div>
                 <div>
-                  <h3 className="font-extrabold text-slate-900 text-sm">{activeDoc.absenceType}</h3>
+                  <h3 className="font-extrabold text-slate-900 text-sm">{activeDoc.absence_type}</h3>
                   <p className="text-[11px] text-slate-500 font-medium">
-                    {activeDoc.workerName} ({activeDoc.workerId}) • {activeDoc.site}
+                    {activeDoc.worker_name} ({activeDoc.worker_id}) • {activeDoc.site}
                   </p>
                 </div>
               </div>
               <button
-                onClick={() => setActiveDoc(null)}
+                onClick={closeModal}
                 className="p-2 text-slate-400 hover:text-slate-700 hover:bg-slate-200 rounded-xl transition cursor-pointer"
               >
                 <X className="w-5 h-5" />
@@ -316,24 +317,33 @@ export default function HRAbsenceReviewPage() {
             <div className="grid grid-cols-1 lg:grid-cols-2 overflow-y-auto divide-y lg:divide-y-0 lg:divide-x divide-slate-200">
               {/* Document Preview Pane */}
               <div className="p-6 bg-slate-950/5 flex flex-col justify-between space-y-4">
-                <div className="bg-white rounded-2xl p-2 border border-slate-200 shadow-sm overflow-hidden flex items-center justify-center min-h-[300px]">
-                  <img
-                    src={activeDoc.fileUrl}
-                    alt={activeDoc.fileName}
-                    className="object-contain max-h-[45vh] w-auto rounded-xl"
-                  />
+                <div className="bg-white rounded-2xl p-2 border border-slate-200 shadow-xs overflow-hidden flex items-center justify-center min-h-[300px]">
+                  {activeDoc.file_url ? (
+                    <img
+                      src={activeDoc.file_url}
+                      alt={activeDoc.file_name || 'Medical Document'}
+                      className="object-contain max-h-[45vh] w-auto rounded-xl"
+                    />
+                  ) : (
+                    <div className="text-center p-6 text-slate-400">
+                      <FileText className="w-12 h-12 mx-auto mb-2 opacity-50" />
+                      <p className="text-xs font-semibold">No file preview attached</p>
+                    </div>
+                  )}
                 </div>
                 <div className="flex items-center justify-between text-xs text-slate-500 font-medium pt-2">
-                  <span>File: {activeDoc.fileName}</span>
-                  <a
-                    href={activeDoc.fileUrl}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="inline-flex items-center gap-1 text-indigo-600 font-bold hover:underline"
-                  >
-                    <Download className="w-3.5 h-3.5" />
-                    Open Original
-                  </a>
+                  <span>File: {activeDoc.file_name || 'N/A'}</span>
+                  {activeDoc.file_url && (
+                    <a
+                      href={activeDoc.file_url}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="inline-flex items-center gap-1 text-indigo-600 font-bold hover:underline"
+                    >
+                      <Download className="w-3.5 h-3.5" />
+                      Open Original
+                    </a>
+                  )}
                 </div>
               </div>
 
@@ -346,46 +356,91 @@ export default function HRAbsenceReviewPage() {
 
                   <div className="bg-slate-50 p-4 rounded-2xl space-y-3 border border-slate-100">
                     <div className="flex justify-between text-xs">
-                      <span className="text-slate-500 font-medium">Attending Medical Practitioner:</span>
-                      <span className="font-bold text-slate-900">{activeDoc.doctorName}</span>
+                      <span className="text-slate-500 font-medium">Attending Practitioner:</span>
+                      <span className="font-bold text-slate-900">{activeDoc.doctor_name || 'N/A'}</span>
                     </div>
                     <div className="flex justify-between text-xs">
                       <span className="text-slate-500 font-medium">Exemption Dates:</span>
-                      <span className="font-bold text-slate-900">{activeDoc.startDate} to {activeDoc.endDate}</span>
+                      <span className="font-bold text-slate-900">{activeDoc.start_date} to {activeDoc.end_date}</span>
                     </div>
                     <div className="flex justify-between text-xs">
                       <span className="text-slate-500 font-medium">Submission Date:</span>
-                      <span className="font-bold text-slate-900">{activeDoc.submittedDate}</span>
+                      <span className="font-bold text-slate-900">{activeDoc.submitted_date}</span>
                     </div>
                   </div>
 
                   <div>
-                    <label className="block text-xs font-bold text-slate-700 mb-1">Doctor's Clinical Notes / Reason</label>
+                    <label className="block text-xs font-bold text-slate-700 mb-1">Clinical Notes / Reason</label>
                     <p className="p-3 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-700 font-medium leading-relaxed">
-                      "{activeDoc.notes}"
+                      "{activeDoc.notes || 'No specific notes provided.'}"
                     </p>
                   </div>
+
+                  {/* Show Rejection Reason if already rejected */}
+                  {activeDoc.status === 'Rejected' && activeDoc.rejection_reason && (
+                    <div className="p-3 bg-rose-50 border border-rose-200 rounded-xl space-y-1">
+                      <div className="flex items-center gap-1.5 text-xs font-extrabold text-rose-700">
+                        <AlertCircle className="w-4 h-4" />
+                        <span>Rejection Reason</span>
+                      </div>
+                      <p className="text-xs text-rose-600 font-medium">{activeDoc.rejection_reason}</p>
+                    </div>
+                  )}
                 </div>
 
                 {/* Actions Section */}
                 <div className="pt-4 border-t border-slate-100 space-y-3">
                   {activeDoc.status === 'Pending' ? (
-                    <div className="flex items-center gap-3">
-                      <button
-                        onClick={() => handleReject(activeDoc.id)}
-                        className="flex-1 py-3 px-4 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 font-bold text-xs rounded-2xl transition cursor-pointer flex items-center justify-center gap-1.5"
-                      >
-                        <XCircle className="w-4 h-4" />
-                        <span>Reject Note</span>
-                      </button>
-                      <button
-                        onClick={() => handleApprove(activeDoc.id)}
-                        className="flex-1 py-3 px-4 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-2xl transition shadow-md shadow-emerald-600/20 cursor-pointer flex items-center justify-center gap-1.5"
-                      >
-                        <CheckCircle2 className="w-4 h-4" />
-                        <span>Approve Absence</span>
-                      </button>
-                    </div>
+                    showRejectInput ? (
+                      <div className="space-y-3 animate-in fade-in duration-150">
+                        <label className="block text-xs font-bold text-rose-700">
+                          State Rejection Reason (Required)
+                        </label>
+                        <textarea
+                          rows={2}
+                          value={rejectionReason}
+                          onChange={(e) => setRejectionReason(e.target.value)}
+                          placeholder="e.g. Unclear signature, missing clinic stamp, invalid dates..."
+                          className="w-full p-3 bg-slate-50 border border-rose-200 rounded-xl text-xs text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-rose-500"
+                        />
+                        <div className="flex gap-2">
+                          <button
+                            onClick={() => setShowRejectInput(false)}
+                            disabled={actionLoading}
+                            className="flex-1 py-2.5 px-3 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs rounded-xl transition cursor-pointer"
+                          >
+                            Cancel
+                          </button>
+                          <button
+                            onClick={() => handleConfirmReject(activeDoc.id)}
+                            disabled={!rejectionReason.trim() || actionLoading}
+                            className="flex-1 py-2.5 px-3 bg-rose-600 hover:bg-rose-700 disabled:opacity-50 text-white font-bold text-xs rounded-xl transition shadow-xs cursor-pointer flex items-center justify-center gap-1.5"
+                          >
+                            {actionLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <XCircle className="w-4 h-4" />}
+                            <span>Confirm Rejection</span>
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="flex items-center gap-3">
+                        <button
+                          onClick={() => setShowRejectInput(true)}
+                          disabled={actionLoading}
+                          className="flex-1 py-3 px-4 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 font-bold text-xs rounded-2xl transition cursor-pointer flex items-center justify-center gap-1.5"
+                        >
+                          <XCircle className="w-4 h-4" />
+                          <span>Reject Note</span>
+                        </button>
+                        <button
+                          onClick={() => handleApprove(activeDoc.id)}
+                          disabled={actionLoading}
+                          className="flex-1 py-3 px-4 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-2xl transition shadow-md shadow-emerald-600/20 cursor-pointer flex items-center justify-center gap-1.5"
+                        >
+                          {actionLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle2 className="w-4 h-4" />}
+                          <span>Approve Absence</span>
+                        </button>
+                      </div>
+                    )
                   ) : (
                     <div className="p-3 bg-slate-100 rounded-2xl text-center text-xs font-bold text-slate-600">
                       This submission has been finalized as <span className="uppercase text-indigo-600">{activeDoc.status}</span>.
