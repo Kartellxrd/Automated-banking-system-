@@ -8,17 +8,18 @@ import {
   Users, 
   Plus, 
   Search, 
-  CreditCard, 
-  Smartphone, 
-  Banknote, 
-  FileText, 
-  Edit3, 
-  Loader2, 
+  X, 
+  Loader2,
+  Edit3,
+  FileText,
   ExternalLink,
-  X 
+  Smartphone,
+  Banknote,
+  CreditCard
 } from 'lucide-react';
 
-export default function EmployeeDirectoryPage() {
+export default function HREmployeesPage() {
+  // Dynamic DB State
   const [employees, setEmployees] = useState([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
@@ -114,12 +115,19 @@ export default function EmployeeDirectoryPage() {
       const res = await fetch('/api/hr/employees', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(editingEmp),
+        body: JSON.stringify({
+          id: editingEmp.id,
+          firstName: editingEmp.first_name,
+          lastName: editingEmp.last_name,
+          contractType: editingEmp.role || 'CASUAL',
+          siteId: editingEmp.site || null,
+          payRateType: 'HOURLY',
+          rate: parseFloat(editingEmp.rate) || 0.00,
+          nationalId: editingEmp.nationalId,
+          bankName: editingEmp.bankName,
+          accountNumber: editingEmp.accountNumber,
+        }),
       });
-
-      if (!res.ok) {
-        throw new Error(`Server error: ${res.status}`);
-      }
 
       const json = await res.json();
       if (json.success) {
@@ -550,7 +558,7 @@ export default function EmployeeDirectoryPage() {
               <div>
                 <label className="text-xs font-bold text-slate-600">Payment Channel</label>
                 <select
-                  value={editingEmp.paymentChannel || 'EFT'}
+                  value={editingEmp.paymentChannel}
                   onChange={(e) => setEditingEmp({ ...editingEmp, paymentChannel: e.target.value })}
                   className="w-full mt-1 p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-800 focus:ring-2 focus:ring-indigo-500/20"
                 >
