@@ -6,7 +6,6 @@ import {
   UploadCloud, 
   FileText, 
   CheckCircle2, 
-  AlertTriangle, 
   Clock, 
   Loader2, 
   Eye, 
@@ -20,11 +19,12 @@ import SiteClerkNavbar from '@/components/site-clerk/SiteClerkNavbar';
 
 function UploadContent() {
   const searchParams = useSearchParams();
-  const siteParam = searchParams.get('site') || 'Site A';
+  const siteParam = searchParams.get('site') || 'Debete Site';
 
   const [selectedFile, setSelectedFile] = useState(null);
   const [filePreviewUrl, setFilePreviewUrl] = useState(null);
   const [uploading, setUploading] = useState(false);
+  const [committing, setCommitting] = useState(false);
   const [parsedData, setParsedData] = useState(null);
   const [submitSuccess, setSubmitSuccess] = useState(false);
 
@@ -78,8 +78,32 @@ function UploadContent() {
     }
   };
 
-  const handleFinalSubmit = () => {
-    setSubmitSuccess(true);
+  const handleFinalSubmit = async () => {
+    if (!parsedData || parsedData.length === 0) return;
+
+    try {
+      setCommitting(true);
+      const res = await fetch('/api/site-clerk/timesheets/confirm', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          records: parsedData,
+          siteName: siteParam,
+          shiftDate: '2026-08-20',
+        }),
+      });
+
+      if (res.ok) {
+        setSubmitSuccess(true);
+      } else {
+        const err = await res.json();
+        console.error('Failed to commit shift logs:', err.error);
+      }
+    } catch (err) {
+      console.error('Submission error:', err);
+    } finally {
+      setCommitting(false);
+    }
   };
 
   return (
@@ -157,7 +181,7 @@ function UploadContent() {
               <div className="bg-white border border-slate-200 rounded-3xl p-4 shadow-xs space-y-2">
                 <div className="flex items-center justify-between text-xs font-bold text-slate-700">
                   <span className="flex items-center gap-1.5">
-                    <Eye className="w-4 h-4 text-indigo-600" /> Image Document Preview
+                    <Eye className="w-4 h-4 text-indigo-600" /> Document Preview
                   </span>
                 </div>
                 <div className="rounded-2xl overflow-hidden border border-slate-200 bg-slate-900 flex justify-center max-h-80">
@@ -178,7 +202,7 @@ function UploadContent() {
                 <div>
                   <h3 className="text-sm font-bold text-slate-900">Extracted Attendance Audit</h3>
                   <p className="text-xs text-slate-500">
-                    Cross-examine parsed values before locking for HR.
+                    Cross-examine parsed values before committing to shift_logs.
                   </p>
                 </div>
                 {parsedData && (
@@ -193,16 +217,16 @@ function UploadContent() {
                   <div className="p-3 bg-emerald-100 text-emerald-700 rounded-full w-12 h-12 flex items-center justify-center mx-auto">
                     <CheckCircle2 className="w-6 h-6" />
                   </div>
-                  <h4 className="text-base font-bold text-emerald-900">Timesheet Ingested & Locked</h4>
+                  <h4 className="text-base font-bold text-emerald-900">Timesheet Logs Locked</h4>
                   <p className="text-xs text-emerald-700 max-w-md mx-auto">
-                    Attendance records for {siteParam} have been validated and sent directly to HR compliance for payroll calculation.
+                    Shift entries for {siteParam} have been stored in shift_logs for payroll calculation.
                   </p>
                   <div className="pt-2">
                     <Link
-                      href="/dashboard/site-clerk/roster"
+                      href="/dashboard/site-clerk"
                       className="inline-flex items-center gap-2 bg-emerald-700 hover:bg-emerald-800 text-white text-xs font-semibold px-4 py-2.5 rounded-xl transition"
                     >
-                      View Shift Roster Logs
+                      Return to Dashboard
                     </Link>
                   </div>
                 </div>
@@ -215,24 +239,24 @@ function UploadContent() {
                           <th className="p-3">Worker Name</th>
                           <th className="p-3">Time In</th>
                           <th className="p-3">Time Out</th>
-                          <th className="p-3">Hours</th>
-                          <th className="p-3">Audit Status</th>
+                          <th className="p-3">Reg. Hours</th>
+                          <th className="p-3">Status</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-100">
                         {parsedData.map((worker) => (
                           <tr key={worker.id} className="hover:bg-slate-50/80 transition">
                             <td className="p-3 font-semibold text-slate-900">
-                              <div>{worker.name}</div>
-                              <div className="text-[10px] text-slate-400 font-normal">{worker.idNumber}</div>
+                              <div>{worker.worker_name}</div>
+                              <div className="text-[10px] text-slate-400 font-normal">{worker.employee_code}</div>
                             </td>
-                            <td className="p-3 font-mono">{worker.timeIn}</td>
-                            <td className="p-3 font-mono">{worker.timeOut}</td>
-                            <td className="p-3 font-bold text-slate-800">{worker.hours}h</td>
+                            <td className="p-3 font-mono">{worker.timeInStr}</td>
+                            <td className="p-3 font-mono">{worker.timeOutStr}</td>
+                            <td className="p-3 font-bold text-slate-800">{worker.regular_hours}h</td>
                             <td className="p-3">
-                              {worker.status === 'matched' && (
+                              {worker.status === 'completed' && (
                                 <span className="inline-flex items-center gap-1 text-[10px] font-bold bg-emerald-50 text-emerald-700 px-2 py-0.5 rounded-md border border-emerald-200">
-                                  <CheckCircle2 className="w-3 h-3" /> Matched
+                                  <CheckCircle2 className="w-3 h-3" /> Completed
                                 </span>
                               )}
                               {worker.status === 'late' && (
@@ -242,7 +266,7 @@ function UploadContent() {
                               )}
                               {worker.status === 'flagged' && (
                                 <span className="inline-flex items-center gap-1 text-[10px] font-bold bg-red-50 text-red-700 px-2 py-0.5 rounded-md border border-red-200">
-                                  <ShieldAlert className="w-3 h-3" /> Manual Check
+                                  <ShieldAlert className="w-3 h-3" /> Flagged
                                 </span>
                               )}
                             </td>
@@ -261,10 +285,20 @@ function UploadContent() {
                     </button>
                     <button
                       onClick={handleFinalSubmit}
-                      className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold px-5 py-2.5 rounded-xl transition shadow-xs cursor-pointer"
+                      disabled={committing}
+                      className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold px-5 py-2.5 rounded-xl transition shadow-xs cursor-pointer disabled:opacity-50"
                     >
-                      <Send className="w-4 h-4" />
-                      <span>Confirm & Lock Timesheet</span>
+                      {committing ? (
+                        <>
+                          <Loader2 className="w-4 h-4 animate-spin" />
+                          <span>Saving to shift_logs...</span>
+                        </>
+                      ) : (
+                        <>
+                          <Send className="w-4 h-4" />
+                          <span>Confirm & Lock to Shift Logs</span>
+                        </>
+                      )}
                     </button>
                   </div>
                 </div>
@@ -275,7 +309,7 @@ function UploadContent() {
                   </div>
                   <p className="text-xs font-bold text-slate-700">No Document Parsed Yet</p>
                   <p className="text-[11px] text-slate-400 max-w-xs">
-                    Select a scanned timesheet image on the left and click process to generate side-by-side audit metrics.
+                    Select a scanned timesheet image or PDF on the left and click process to generate side-by-side audit metrics.
                   </p>
                 </div>
               )}
