@@ -10,7 +10,7 @@ import {
   FileSearch,
   ShieldCheck,
   CheckSquare,
-  FileText, // Added for Document Docket
+  FileText,
   LogOut,
   Menu,
   X,
@@ -65,8 +65,8 @@ export default function HRSideNav() {
 
   return (
     <>
-      {/* Mobile Top Toggle */}
-      <div className="lg:hidden bg-slate-900 text-white p-4 flex items-center justify-between border-b border-slate-800">
+      {/* Mobile Top Toggle (Stays at the top of mobile viewports) */}
+      <div className="lg:hidden sticky top-0 z-40 bg-slate-900 text-white p-4 flex items-center justify-between border-b border-slate-800">
         <div className="flex items-center gap-2">
           <div className="p-2 bg-indigo-600 rounded-xl text-white">
             <Building2 className="w-5 h-5" />
@@ -81,13 +81,16 @@ export default function HRSideNav() {
         </button>
       </div>
 
-      {/* Navigation Sidebar */}
+      {/* Invisible desktop spacer to prevent main content from hiding behind the fixed sidebar */}
+      <div className="hidden lg:block w-72 shrink-0 h-screen" />
+
+      {/* Fixed Navigation Sidebar */}
       <aside
-        className={`fixed lg:static inset-y-0 left-0 z-50 w-72 bg-slate-900 text-slate-300 flex flex-col justify-between p-6 transition-transform duration-300 ease-in-out ${
+        className={`fixed inset-y-0 left-0 z-50 w-72 h-screen bg-slate-900 text-slate-300 flex flex-col justify-between p-6 transition-transform duration-300 ease-in-out ${
           isOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'
         }`}
       >
-        <div className="space-y-8">
+        <div className="space-y-8 overflow-y-auto">
           {/* Logo Header */}
           <div className="hidden lg:flex items-center gap-3 px-2">
             <div className="p-2.5 bg-indigo-600 rounded-2xl text-white shadow-lg shadow-indigo-600/30">
@@ -128,7 +131,7 @@ export default function HRSideNav() {
         </div>
 
         {/* Footer Section */}
-        <div className="pt-6 border-t border-slate-800 space-y-4">
+        <div className="pt-6 border-t border-slate-800 space-y-4 shrink-0">
           <div className="flex items-center gap-3 px-2 py-1">
             <div className="w-9 h-9 rounded-full bg-indigo-950 border border-indigo-700/50 flex items-center justify-center text-indigo-300 font-black text-xs shrink-0">
               HR
