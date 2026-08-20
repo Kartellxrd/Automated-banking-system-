@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import HRSideNav from '@/components/hr/HRSideNav';
 import HRNavbar from '@/components/hr/HRNavbar';
 import { 
@@ -12,109 +12,89 @@ import {
   FileCheck, 
   User, 
   ArrowRight,
-  Filter,
-  DollarSign,
   AlertCircle,
-  X
+  X,
+  Loader2
 } from 'lucide-react';
 
 export default function HRComplianceMatchingPage() {
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedFilter, setSelectedFilter] = useState('All');
   const [activeMatch, setActiveMatch] = useState(null);
-
-  // Mock Compliance Matching Data
-  const [records, setRecords] = useState([
-    {
-      id: 'CMP-901',
-      workerName: 'Kago Phuthego',
-      workerId: 'EMP-8802',
-      site: 'Jwaneng Pit B',
-      jobTitle: 'Heavy Machinery Operator',
-      loggedHours: 168,
-      contractRate: 'BWP 120.00/hr',
-      timesheetRate: 'BWP 120.00/hr',
-      complianceStatus: 'Matched',
-      certStatus: 'Valid',
-      certExpiry: '2027-04-15',
-      payCode: 'REG-01',
-      mismatchDetails: null,
-    },
-    {
-      id: 'CMP-902',
-      workerName: 'Thabo Mokoena',
-      workerId: 'EMP-4105',
-      site: 'Orapa Shaft 3',
-      jobTitle: 'Underground Blaster',
-      loggedHours: 180,
-      contractRate: 'BWP 145.00/hr',
-      timesheetRate: 'BWP 165.00/hr',
-      complianceStatus: 'Rate Mismatch',
-      certStatus: 'Valid',
-      certExpiry: '2026-11-20',
-      payCode: 'OT-1.5',
-      mismatchDetails: 'Site supervisor billed OT rate without prior written authorization.',
-    },
-    {
-      id: 'CMP-903',
-      workerName: 'Kabelo Sechele',
-      workerId: 'EMP-2901',
-      site: 'Karowe Diamond Mine',
-      jobTitle: 'Safety Inspector',
-      loggedHours: 160,
-      contractRate: 'BWP 135.00/hr',
-      timesheetRate: 'BWP 135.00/hr',
-      complianceStatus: 'Cert Expired',
-      certStatus: 'Expired',
-      certExpiry: '2026-07-31',
-      payCode: 'REG-01',
-      mismatchDetails: 'Mine Safety Clearance Card expired on July 31, 2026.',
-    },
-    {
-      id: 'CMP-904',
-      workerName: 'Lindiwe Dlamini',
-      workerId: 'EMP-6043',
-      site: 'Jwaneng Plant 1',
-      jobTitle: 'Plant Technician',
-      loggedHours: 172,
-      contractRate: 'BWP 110.00/hr',
-      timesheetRate: 'BWP 110.00/hr',
-      complianceStatus: 'Matched',
-      certStatus: 'Valid',
-      certExpiry: '2027-01-10',
-      payCode: 'REG-01',
-      mismatchDetails: null,
-    },
-  ]);
+  const [records, setRecords] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [actionLoading, setActionLoading] = useState(false);
+  const [error, setError] = useState(null);
 
   const filterTabs = ['All', 'Matched', 'Rate Mismatch', 'Cert Expired'];
 
-  // Match / Resolve Handlers
-  const handleApproveMatch = (id) => {
-    setRecords((prev) =>
-      prev.map((item) =>
-        item.id === id ? { ...item, complianceStatus: 'Matched', mismatchDetails: null } : item
-      )
-    );
-    setActiveMatch(null);
-  };
+  // Fetch compliance records directly from Supabase API endpoint
+  const fetchRecords = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const params = new URLSearchParams();
+      if (selectedFilter !== 'All') params.append('status', selectedFilter);
+      if (searchTerm.trim()) params.append('search', searchTerm.trim());
 
-  const filteredRecords = records.filter((rec) => {
-    const matchesFilter = selectedFilter === 'All' || rec.complianceStatus === selectedFilter;
-    const matchesSearch =
-      rec.workerName.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      rec.workerId.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      rec.site.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      rec.jobTitle.toLowerCase().includes(searchTerm.toLowerCase());
-    return matchesFilter && matchesSearch;
-  });
+      const res = await fetch(`/api/hr/complaince?${params.toString()}`);
+      const result = await res.json();
+
+      if (!res.ok || !result.success) {
+        throw new Error(result.error || 'Failed to fetch compliance records');
+      }
+
+      setRecords(result.data || []);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  }, [selectedFilter, searchTerm]);
+
+  // Debounce API requests on search and tab changes
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      fetchRecords();
+    }, 300);
+
+    return () => clearTimeout(timer);
+  }, [fetchRecords]);
+
+  // Force Align Action Handler
+  const handleApproveMatch = async (id) => {
+    setActionLoading(true);
+    try {
+      const res = await fetch('/api/hr/complaince', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id, action: 'FORCE_ALIGN' }),
+      });
+
+      const result = await res.json();
+
+      if (!res.ok || !result.success) {
+        throw new Error(result.error || 'Failed to align record');
+      }
+
+      // Optimistically update status in state
+      setRecords((prev) =>
+        prev.map((item) =>
+          item.id === id ? { ...item, complianceStatus: 'Matched', mismatchDetails: null } : item
+        )
+      );
+      setActiveMatch(null);
+    } catch (err) {
+      alert(`Action failed: ${err.message}`);
+    } finally {
+      setActionLoading(false);
+    }
+  };
 
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col lg:flex-row font-sans">
-      {/* HR Side Navigation */}
       <HRSideNav />
 
-      {/* Main Content Area */}
       <div className="flex-1 flex flex-col min-w-0">
         <HRNavbar />
 
@@ -170,17 +150,28 @@ export default function HRComplianceMatchingPage() {
             <div className="p-5 border-b border-slate-100 flex items-center justify-between">
               <h2 className="text-base font-black text-slate-900 flex items-center gap-2">
                 <FileCheck className="w-5 h-5 text-indigo-600" />
-                <span>Compliance Entries ({filteredRecords.length})</span>
+                <span>Compliance Entries ({records.length})</span>
               </h2>
             </div>
 
-            {filteredRecords.length === 0 ? (
+            {loading ? (
+              <div className="p-12 text-center space-y-3">
+                <Loader2 className="w-6 h-6 text-indigo-600 animate-spin mx-auto" />
+                <p className="text-slate-500 text-xs font-semibold">Fetching compliance data from database...</p>
+              </div>
+            ) : error ? (
+              <div className="p-12 text-center space-y-2">
+                <AlertCircle className="w-6 h-6 text-rose-500 mx-auto" />
+                <p className="text-slate-900 text-sm font-bold">Failed to load records</p>
+                <p className="text-slate-500 text-xs">{error}</p>
+              </div>
+            ) : records.length === 0 ? (
               <div className="p-12 text-center space-y-3">
                 <div className="w-12 h-12 bg-slate-100 rounded-2xl text-slate-400 flex items-center justify-center mx-auto">
                   <ShieldCheck className="w-6 h-6" />
                 </div>
                 <p className="text-slate-600 text-sm font-bold">No compliance matching entries found.</p>
-                <p className="text-slate-400 text-xs">Try clearing your filters or search term.</p>
+                <p className="text-slate-400 text-xs">Try adjusting your filters or search term.</p>
               </div>
             ) : (
               <div className="overflow-x-auto">
@@ -196,7 +187,7 @@ export default function HRComplianceMatchingPage() {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100 text-xs font-medium text-slate-700">
-                    {filteredRecords.map((rec) => (
+                    {records.map((rec) => (
                       <tr key={rec.id} className="hover:bg-indigo-50/30 transition">
                         <td className="py-4 px-6">
                           <div className="flex items-center gap-3">
@@ -265,13 +256,10 @@ export default function HRComplianceMatchingPage() {
         </main>
       </div>
 
-      {/* ========================================================= */}
       {/* INSPECT & RATE PAIRING MODAL */}
-      {/* ========================================================= */}
       {activeMatch && (
         <div className="fixed inset-0 z-50 bg-slate-950/70 backdrop-blur-xs flex items-center justify-center p-4 sm:p-6 animate-in fade-in duration-200">
           <div className="bg-white w-full max-w-2xl rounded-3xl shadow-2xl overflow-hidden flex flex-col border border-slate-200">
-            {/* Modal Header */}
             <div className="p-4 sm:p-5 border-b border-slate-200 flex items-center justify-between bg-slate-50">
               <div className="flex items-center gap-3">
                 <div className="p-2.5 rounded-2xl bg-indigo-50 text-indigo-600 border border-indigo-100">
@@ -286,13 +274,13 @@ export default function HRComplianceMatchingPage() {
               </div>
               <button
                 onClick={() => setActiveMatch(null)}
+                disabled={actionLoading}
                 className="p-2 text-slate-400 hover:text-slate-700 hover:bg-slate-200 rounded-xl transition cursor-pointer"
               >
                 <X className="w-5 h-5" />
               </button>
             </div>
 
-            {/* Modal Body */}
             <div className="p-6 space-y-6 bg-white">
               <div className="grid grid-cols-2 gap-4 bg-slate-50 p-4 rounded-2xl border border-slate-100">
                 <div>
@@ -335,19 +323,21 @@ export default function HRComplianceMatchingPage() {
               </div>
             </div>
 
-            {/* Modal Actions */}
             <div className="p-4 sm:p-5 border-t border-slate-100 bg-slate-50 flex items-center justify-end gap-3">
               <button
                 onClick={() => setActiveMatch(null)}
-                className="px-4 py-2.5 text-xs font-bold text-slate-600 hover:bg-slate-200 rounded-xl transition"
+                disabled={actionLoading}
+                className="px-4 py-2.5 text-xs font-bold text-slate-600 hover:bg-slate-200 rounded-xl transition disabled:opacity-50"
               >
                 Cancel
               </button>
               <button
                 onClick={() => handleApproveMatch(activeMatch.id)}
-                className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs rounded-xl transition shadow-md shadow-indigo-600/20"
+                disabled={actionLoading}
+                className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs rounded-xl transition shadow-md shadow-indigo-600/20 flex items-center gap-2 disabled:opacity-50 cursor-pointer"
               >
-                Force Align & Confirm Match
+                {actionLoading && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+                <span>Force Align & Confirm Match</span>
               </button>
             </div>
           </div>
