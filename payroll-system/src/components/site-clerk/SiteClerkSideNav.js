@@ -6,7 +6,7 @@ import { useRouter, usePathname } from 'next/navigation';
 import {
   Building2,
   LayoutDashboard,
-  QrCode,
+  FileUp,
   CalendarCheck,
   FileText,
   LogOut,
@@ -37,7 +37,7 @@ export default function SiteClerkSideNav() {
     }
   };
 
-  // Site Clerk Navigation Items
+  // Site Clerk Navigation Items - Updated for Paper Timesheet Ingestion Workflow
   const navItems = [
     {
       name: 'Field Operations',
@@ -47,9 +47,9 @@ export default function SiteClerkSideNav() {
       exact: true,
     },
     {
-      name: 'QR Kiosk Terminal',
-      href: '/dashboard/site-clerk/kiosk',
-      icon: QrCode,
+      name: 'Upload Paper Timesheet',
+      href: '/dashboard/site-clerk/timesheet-upload',
+      icon: FileUp,
     },
     {
       name: 'Shift Log & Roster',
