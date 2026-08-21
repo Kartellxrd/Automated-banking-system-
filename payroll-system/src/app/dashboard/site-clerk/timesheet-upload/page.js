@@ -24,6 +24,7 @@ function UploadContent() {
   const [shiftDate, setShiftDate] = useState('2026-08-21');
   const [selectedFile, setSelectedFile] = useState(null);
   const [filePreviewUrl, setFilePreviewUrl] = useState(null);
+  const [documentUrl, setDocumentUrl] = useState(null);
   const [uploading, setUploading] = useState(false);
   const [committing, setCommitting] = useState(false);
   const [parsedData, setParsedData] = useState(null);
@@ -69,6 +70,7 @@ function UploadContent() {
 
       if (res.ok) {
         setParsedData(data.parsedWorkers || []);
+        setDocumentUrl(data.documentUrl || null);
       } else {
         console.error('Failed to load roster:', data.error);
       }
@@ -79,7 +81,6 @@ function UploadContent() {
     }
   };
 
-  // Field inline editor handlers
   const handleWorkerChange = (id, field, value) => {
     setParsedData((prev) =>
       prev.map((worker) => {
@@ -87,7 +88,6 @@ function UploadContent() {
 
         const updated = { ...worker, [field]: value };
 
-        // Handle status exception overrides
         if (field === 'status' && ['sick_leave', 'awol', 'on_leave'].includes(value)) {
           updated.timeInStr = '--:--';
           updated.timeOutStr = '--:--';
@@ -109,9 +109,11 @@ function UploadContent() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
+          parsedWorkers: parsedData,
           records: parsedData,
           siteName: siteParam,
           shiftDate: shiftDate,
+          documentUrl: documentUrl,
         }),
       });
 
@@ -289,7 +291,7 @@ function UploadContent() {
                                 <input
                                   type="text"
                                   disabled={isInactive}
-                                  value={worker.timeInStr}
+                                  value={worker.timeInStr || ''}
                                   onChange={(e) => handleWorkerChange(worker.id, 'timeInStr', e.target.value)}
                                   className="w-16 font-mono text-xs bg-slate-50 border border-slate-200 rounded p-1 text-center disabled:opacity-40"
                                 />
@@ -298,7 +300,7 @@ function UploadContent() {
                                 <input
                                   type="text"
                                   disabled={isInactive}
-                                  value={worker.timeOutStr}
+                                  value={worker.timeOutStr || ''}
                                   onChange={(e) => handleWorkerChange(worker.id, 'timeOutStr', e.target.value)}
                                   className="w-16 font-mono text-xs bg-slate-50 border border-slate-200 rounded p-1 text-center disabled:opacity-40"
                                 />
@@ -307,14 +309,14 @@ function UploadContent() {
                                 <input
                                   type="number"
                                   disabled={isInactive}
-                                  value={worker.regular_hours}
+                                  value={worker.regular_hours ?? 0}
                                   onChange={(e) => handleWorkerChange(worker.id, 'regular_hours', Number(e.target.value))}
                                   className="w-12 font-bold text-xs bg-slate-50 border border-slate-200 rounded p-1 text-center disabled:opacity-40"
                                 />
                               </td>
                               <td className="p-3">
                                 <select
-                                  value={worker.status}
+                                  value={worker.status || 'completed'}
                                   onChange={(e) => handleWorkerChange(worker.id, 'status', e.target.value)}
                                   className="text-xs font-bold bg-slate-50 border border-slate-200 rounded-lg p-1 text-slate-800 outline-none"
                                 >

@@ -2,8 +2,52 @@ import { NextResponse } from 'next/server';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import { supabase } from '@/lib/supabase';
 
-// Initialize Gemini SDK with explicit API Key
+// Initialize Gemini SDK
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || '');
+
+// Fallback model list using active production tiers
+const FLASH_MODELS = ['gemini-3.6-flash', 'gemini-1.5-flash', 'gemini-2.0-flash'];
+
+async function generateContentWithRetry(prompt, imagePayload, retries = 2) {
+  let lastError = null;
+
+  for (const modelName of FLASH_MODELS) {
+    try {
+      const model = genAI.getGenerativeModel({
+        model: modelName,
+        generationConfig: { responseMimeType: 'application/json' },
+      });
+
+      for (let attempt = 0; attempt <= retries; attempt++) {
+        try {
+          const result = await model.generateContent([prompt, imagePayload]);
+          return result;
+        } catch (err) {
+          lastError = err;
+          const isCapacityError =
+            err.status === 503 ||
+            err.status === 429 ||
+            err.message?.includes('503') ||
+            err.message?.includes('429');
+
+          // Retry exponential backoff on rate/capacity limits
+          if (isCapacityError && attempt < retries) {
+            await new Promise((res) => setTimeout(res, (attempt + 1) * 1000));
+            continue;
+          }
+
+          // If exhausted retries or non-capacity error, break to attempt next model in chain
+          break;
+        }
+      }
+    } catch (modelInitErr) {
+      lastError = modelInitErr;
+      continue;
+    }
+  }
+
+  throw lastError || new Error('All model attempts failed.');
+}
 
 export async function POST(request) {
   try {
@@ -27,12 +71,6 @@ export async function POST(request) {
     const base64Image = Buffer.from(fileBuffer).toString('base64');
     const mimeType = file.type || 'image/png';
 
-    // 1. Call active Gemini Vision Model
-    const model = genAI.getGenerativeModel({
-      model: 'gemini-3.7-flash',
-      generationConfig: { responseMimeType: 'application/json' },
-    });
-
     const prompt = `
       Extract all rows from this daily site timesheet image into JSON.
       Return JSON with this exact structure:
@@ -51,15 +89,15 @@ export async function POST(request) {
       }
     `;
 
-    const result = await model.generateContent([
-      prompt,
-      {
-        inlineData: {
-          data: base64Image,
-          mimeType,
-        },
+    const imagePayload = {
+      inlineData: {
+        data: base64Image,
+        mimeType,
       },
-    ]);
+    };
+
+    // 1. Call Gemini Vision Model with Retries & Active Fallback Chain
+    const result = await generateContentWithRetry(prompt, imagePayload);
 
     const responseText = result.response.text();
     const parsedJson = JSON.parse(responseText);
