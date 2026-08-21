@@ -3,114 +3,95 @@ import { supabase } from '@/lib/supabase';
 
 export async function POST(request) {
   try {
-    const { records, siteName, shiftDate, documentUrl } = await request.json();
+    const body = await request.json();
 
-    if (!records || !Array.isArray(records) || records.length === 0) {
-      return NextResponse.json({ error: 'No records provided to commit.' }, { status: 400 });
+    // Standardize worker list array across potential frontend keys
+    const rawWorkers = body.parsedWorkers || body.parsedData || body.workers || body.roster || [];
+    const siteName = body.siteName || body.selectedSite || 'Debete Site';
+    const shiftDate = body.shiftDate || body.targetDate || new Date().toISOString().split('T')[0];
+    const documentUrl = body.documentUrl || null;
+
+    if (!rawWorkers || rawWorkers.length === 0) {
+      return NextResponse.json(
+        { error: 'No worker records to process.' },
+        { status: 400 }
+      );
     }
 
-    const { data: { user } } = await supabase.auth.getUser();
-    const datePrefix = shiftDate || new Date().toISOString().split('T')[0];
+    const processedLogs = [];
 
-    const parseToIso = (dateStr, timeStr) => {
-      try {
-        if (!timeStr || timeStr === '--:--') return null;
-        const fullStr = `${dateStr} ${timeStr}`;
-        const parsedDate = new Date(fullStr);
-        if (isNaN(parsedDate.getTime())) return null;
-        return parsedDate.toISOString();
-      } catch {
-        return null;
-      }
-    };
+    for (const worker of rawWorkers) {
+      let employeeId = worker.employee_id || worker.employeeId || null;
+      const workerName = worker.worker_name || worker.workerName || 'Unknown Worker';
+      const nationalId = worker.national_id || worker.idNumber || null;
 
-    const finalShiftLogs = [];
+      // Auto-register walk-on/unregistered workers
+      if (worker.is_unregistered || !employeeId) {
+        const [firstName, ...lastNameParts] = workerName.trim().split(' ');
+        const lastName = lastNameParts.join(' ') || 'Worker';
 
-    // Process each worker row
-    for (const rec of records) {
-      let activeEmployeeId = rec.employee_id;
-      let isNewWorker = false;
-
-      // 1. If worker does NOT exist in DB, insert them into `employees` table first
-      if (!activeEmployeeId || rec.is_unregistered) {
-        const rawName = (rec.worker_name || 'WalkOn Worker').trim();
-        const nameParts = rawName.split(' ');
-        const firstName = nameParts[0] || 'WalkOn';
-        const lastName = nameParts.slice(1).join(' ') || 'Worker';
-        const generatedCode = `TEMP-${Math.floor(1000 + Math.random() * 9000)}`;
-
-        const { data: newEmp, error: empInsertError } = await supabase
+        const { data: newEmp } = await supabase
           .from('employees')
           .insert({
             first_name: firstName,
             last_name: lastName,
-            employee_code: generatedCode,
-            site_location: siteName || 'General Site',
-            status: 'active',
-            position: 'General Worker',
+            national_id: nationalId,
+            employee_code: worker.employee_code || `WALKON-${nationalId || Date.now()}`,
+            assigned_site: siteName,
+            status: 'Active',
           })
           .select('id')
           .single();
 
-        if (!empInsertError && newEmp) {
-          activeEmployeeId = newEmp.id;
-          isNewWorker = true;
-        } else {
-          console.error('Failed to create walk-on employee row:', empInsertError);
+        if (newEmp) {
+          employeeId = newEmp.id;
         }
       }
 
-      const clockInIso = parseToIso(datePrefix, rec.timeInStr);
-      const clockOutIso = parseToIso(datePrefix, rec.timeOutStr);
-
-      let noteDetails = `Batch entry for ${siteName || 'Site'} on ${datePrefix}.`;
-      if (isNewWorker) {
-        noteDetails += ` [Auto-Registered Walk-On Worker: ${rec.worker_name}]`;
-      }
-      if (documentUrl) {
-        noteDetails += ` | Attached Sheet: ${documentUrl}`;
-      }
-
-      finalShiftLogs.push({
-        employee_id: activeEmployeeId,
-        shift_date: datePrefix,
-        clock_in: clockInIso,
-        clock_out: clockOutIso,
-        regular_hours: Number(rec.regular_hours) || 0.0,
-        overtime_hours: Number(rec.overtime_hours) || 0.0,
-        site_name: siteName || rec.site_location || 'General Site',
-        site_location: siteName || rec.site_location || 'General Site',
-        status: rec.status || 'completed',
-        logged_by: user?.id || null,
-        is_unregistered: isNewWorker,
-        unregistered_worker_name: isNewWorker ? rec.worker_name : null,
-        supervisor_notes: noteDetails,
+      // Build shift log entry
+      processedLogs.push({
+        employee_id: employeeId,
+        site_name: siteName,
+        shift_date: shiftDate,
+        time_in: worker.timeInStr || worker.timeIn || '07:00 AM',
+        time_out: worker.timeOutStr || worker.timeOut || '05:00 PM',
+        regular_hours: Number(worker.regular_hours ?? worker.regHours ?? 8),
+        overtime_hours: Number(worker.overtime_hours ?? worker.otHours ?? 0),
+        total_hours:
+          Number(worker.regular_hours ?? worker.regHours ?? 8) +
+          Number(worker.overtime_hours ?? worker.otHours ?? 0),
+        is_late: Boolean(worker.warnings?.is_late || worker.isLate || false),
+        status: 'Locked',
       });
     }
 
-    // 2. Commit logs to shift_logs with upsert logic
-    const { data, error } = await supabase
+    // Upsert into shift logs
+    const { error: logError } = await supabase
       .from('shift_logs')
-      .upsert(finalShiftLogs, {
-        onConflict: 'employee_id, shift_date',
-        ignoreDuplicates: false,
-      })
-      .select();
+      .upsert(processedLogs, { onConflict: 'employee_id, shift_date' });
 
-    if (error) {
-      console.error('Database Error committing shift_logs:', error);
-      return NextResponse.json({ error: error.message }, { status: 400 });
+    if (logError) {
+      console.error('Shift Log DB Error:', logError.message);
+      return NextResponse.json({ error: logError.message }, { status: 500 });
     }
+
+    // Insert approved timesheet document log
+    await supabase.from('timesheets').insert({
+      site_name: siteName,
+      shift_date: shiftDate,
+      total_workers: rawWorkers.length,
+      document_url: documentUrl,
+      status: 'approved',
+    });
 
     return NextResponse.json({
       success: true,
-      committedCount: data ? data.length : 0,
-      logs: data,
+      message: `Successfully locked ${rawWorkers.length} shift logs for ${siteName}.`,
     });
   } catch (err) {
-    console.error('Commit Shift Error:', err);
+    console.error('Confirmation Handler Error:', err);
     return NextResponse.json(
-      { error: err.message || 'Internal server error while writing shift logs.' },
+      { error: err.message || 'Internal server error.' },
       { status: 500 }
     );
   }

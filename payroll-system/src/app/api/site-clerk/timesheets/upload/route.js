@@ -1,138 +1,164 @@
 import { NextResponse } from 'next/server';
+import { GoogleGenerativeAI } from '@google/generative-ai';
 import { supabase } from '@/lib/supabase';
+
+// Initialize Gemini SDK with explicit API Key
+const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || '');
 
 export async function POST(request) {
   try {
     const formData = await request.formData();
     const file = formData.get('file');
-    const siteName = formData.get('siteName') || '';
-    const shiftDate = formData.get('shiftDate') || new Date().toISOString().split('T')[0];
+    const selectedSiteName = formData.get('siteName') || 'Site A';
+    const fallbackShiftDate = formData.get('shiftDate') || new Date().toISOString().split('T')[0];
 
     if (!file) {
-      return NextResponse.json({ error: 'No timesheet document provided.' }, { status: 400 });
+      return NextResponse.json({ error: 'No timesheet image uploaded.' }, { status: 400 });
     }
 
-    // 1. Process and upload document attachment to Supabase Storage
-    const fileExt = file.name ? file.name.split('.').pop() : 'pdf';
-    const cleanSiteName = siteName ? siteName.replace(/[^a-zA-Z0-9_-]/g, '_') : 'General';
-    const fileName = `${cleanSiteName}_${shiftDate}_${Date.now()}.${fileExt}`;
+    if (!process.env.GEMINI_API_KEY) {
+      return NextResponse.json(
+        { error: 'GEMINI_API_KEY is not defined in environment variables.' },
+        { status: 500 }
+      );
+    }
+
     const fileBuffer = await file.arrayBuffer();
+    const base64Image = Buffer.from(fileBuffer).toString('base64');
+    const mimeType = file.type || 'image/png';
 
-    const { data: storageData, error: storageError } = await supabase.storage
-      .from('timesheet-attachments')
-      .upload(fileName, fileBuffer, {
-        contentType: file.type || 'application/pdf',
-        upsert: true,
-      });
+    // 1. Call active Gemini Vision Model
+    const model = genAI.getGenerativeModel({
+      model: 'gemini-3.7-flash',
+      generationConfig: { responseMimeType: 'application/json' },
+    });
 
-    let documentUrl = null;
-    if (!storageError && storageData) {
-      const { data: publicUrlData } = supabase.storage
-        .from('timesheet-attachments')
-        .getPublicUrl(fileName);
-      documentUrl = publicUrlData?.publicUrl || null;
-    }
+    const prompt = `
+      Extract all rows from this daily site timesheet image into JSON.
+      Return JSON with this exact structure:
+      {
+        "siteName": "string or null",
+        "documentDate": "YYYY-MM-DD or null",
+        "workers": [
+          {
+            "workerName": "string",
+            "idNumber": "string",
+            "timeIn": "HH:MM AM/PM",
+            "timeOut": "HH:MM AM/PM",
+            "signature": "string"
+          }
+        ]
+      }
+    `;
 
-    // 2. Parallel Database Lookups: Roster, Existing Shift Logs, and Approved Leave
-    const [
-      { data: siteEmployees, error: empError },
-      { data: existingLogs, error: logError },
-      { data: crossSiteLogs, error: crossLogError },
-      { data: leaveRecords, error: leaveError },
-    ] = await Promise.all([
-      // Fetch active site employees
-      supabase
-        .from('employees')
-        .select('id, first_name, last_name, employee_code, site_location')
-        .eq('status', 'active')
-        .ilike('site_location', `%${siteName}%`),
-
-      // Check if shift logs already exist for this site and date (Duplicate Check)
-      supabase
-        .from('shift_logs')
-        .select('id, employee_id, site_name, shift_date')
-        .ilike('site_name', `%${siteName}%`)
-        .eq('shift_date', shiftDate),
-
-      // Check if employees are already logged at OTHER sites on this date (Double-booking Check)
-      supabase
-        .from('shift_logs')
-        .select('employee_id, site_name, regular_hours')
-        .eq('shift_date', shiftDate)
-        .not('site_name', 'ilike', `%${siteName}%`),
-
-      // Check approved leave requests spanning shiftDate
-      supabase
-        .from('leave_requests')
-        .select('employee_id, leave_type')
-        .lte('start_date', shiftDate)
-        .gte('end_date', shiftDate)
-        .eq('status', 'approved'),
+    const result = await model.generateContent([
+      prompt,
+      {
+        inlineData: {
+          data: base64Image,
+          mimeType,
+        },
+      },
     ]);
 
-    if (empError) {
-      console.error('Error fetching employees:', empError);
-      return NextResponse.json({ error: 'Failed to retrieve site roster.' }, { status: 500 });
-    }
+    const responseText = result.response.text();
+    const parsedJson = JSON.parse(responseText);
+    const extractedWorkers = parsedJson.workers || [];
+    const shiftDate = parsedJson.documentDate || fallbackShiftDate;
 
-    // Map warning lookups for quick evaluation
-    const existingLogEmpIds = new Set((existingLogs || []).map((l) => l.employee_id));
-    
-    const crossSiteMap = new Map();
-    (crossSiteLogs || []).forEach((l) => {
-      crossSiteMap.set(l.employee_id, { site: l.site_name, hours: l.regular_hours });
-    });
+    // 2. Fetch DB Employees for Cross-Matching
+    const { data: dbEmployees } = await supabase
+      .from('employees')
+      .select('id, first_name, last_name, national_id, employee_code, assigned_site');
 
-    const leaveMap = new Map();
-    (leaveRecords || []).forEach((r) => {
-      leaveMap.set(r.employee_id, r.leave_type);
-    });
+    // 3. Dynamic Calculation Helper
+    const calculateHours = (timeInStr, timeOutStr) => {
+      try {
+        const parseTime = (timeStr) => {
+          if (!timeStr) return null;
+          const match = timeStr.match(/(\d+):(\d+)\s*(AM|PM)?/i);
+          if (!match) return null;
+          let [, hours, minutes, modifier] = match;
+          hours = parseInt(hours, 10);
+          minutes = parseInt(minutes, 10);
+          if (modifier) {
+            if (modifier.toUpperCase() === 'PM' && hours < 12) hours += 12;
+            if (modifier.toUpperCase() === 'AM' && hours === 12) hours = 0;
+          }
+          return hours + minutes / 60;
+        };
 
-    // 3. Format Roster & Attach Diagnostics
-    const parsedWorkers = (siteEmployees || []).map((emp, index) => {
-      const isCrossLogged = crossSiteMap.get(emp.id);
-      const leaveType = leaveMap.get(emp.id);
+        const start = parseTime(timeInStr);
+        const end = parseTime(timeOutStr);
+        if (start === null || end === null) return { reg: 8, ot: 0, isLate: false };
+
+        const total = Math.max(0, end - start);
+        const isLate = start > 7.25; // Clocked in after 07:15 AM
+        const reg = Math.min(8, total);
+        const ot = Math.max(0, total - 8);
+
+        return { reg, ot, isLate };
+      } catch {
+        return { reg: 8, ot: 0, isLate: false };
+      }
+    };
+
+    // 4. Map OCR Workers to Database Records
+    const parsedWorkers = extractedWorkers.map((worker, index) => {
+      const cleanName = (worker.workerName || 'Unknown Worker').trim();
+      const nationalId = worker.idNumber ? worker.idNumber.trim() : null;
+      const { reg, ot, isLate } = calculateHours(worker.timeIn, worker.timeOut);
+
+      const match = (dbEmployees || []).find((emp) => {
+        const dbFullName = `${emp.first_name} ${emp.last_name}`.toLowerCase();
+        return (
+          (nationalId && emp.national_id === nationalId) ||
+          dbFullName === cleanName.toLowerCase()
+        );
+      });
 
       return {
-        id: emp.id || index + 1,
-        employee_id: emp.id,
-        worker_name: `${emp.first_name} ${emp.last_name}`.trim(),
-        employee_code: emp.employee_code || `EMP-${emp.id}`,
-        site_location: emp.site_location || siteName || 'Unassigned',
-        timeInStr: '07:00',
-        timeOutStr: '17:00',
-        regular_hours: 9,
-        overtime_hours: 0,
-        status: leaveType ? 'on_leave' : 'completed',
-        is_unregistered: false,
+        id: match?.id || index + 1,
+        employee_id: match?.id || null,
+        worker_name: cleanName,
+        national_id: nationalId,
+        employee_code: match?.employee_code || `WALKON-${nationalId || index + 1}`,
+        site_location: match?.assigned_site || selectedSiteName,
+        timeInStr: worker.timeIn,
+        timeOutStr: worker.timeOut,
+        regular_hours: reg,
+        overtime_hours: ot,
+        status: 'completed',
+        is_unregistered: !match,
         warnings: {
-          already_logged_here: existingLogEmpIds.has(emp.id),
-          cross_site_logged: isCrossLogged ? isCrossLogged.site : null,
-          hr_leave_status: leaveType || null,
+          is_late: isLate,
+          not_in_database: !match,
         },
       };
     });
 
-    // 4. Operational Flag Diagnostics
-    const warnings = {
-      is_duplicate_shift: existingLogs && existingLogs.length > 0,
-      site_mismatch_or_empty: !siteEmployees || siteEmployees.length === 0,
-      total_existing_records: existingLogs ? existingLogs.length : 0,
-    };
+    // 5. Store File Attachment in Supabase Storage
+    const fileName = `${selectedSiteName}_${shiftDate}_${Date.now()}.${mimeType.split('/')[1] || 'png'}`;
+    const { data: storageData } = await supabase.storage
+      .from('timesheet-attachments')
+      .upload(fileName, fileBuffer, { contentType: mimeType, upsert: true });
+
+    const { data: publicUrlData } = supabase.storage
+      .from('timesheet-attachments')
+      .getPublicUrl(fileName);
 
     return NextResponse.json({
       success: true,
-      documentUrl,
+      documentUrl: publicUrlData?.publicUrl || null,
       shiftDate,
-      siteName,
+      siteName: parsedJson.siteName || selectedSiteName,
       workerCount: parsedWorkers.length,
-      warnings,
       parsedWorkers,
     });
   } catch (err) {
-    console.error('Timesheet Ingestion Error:', err);
+    console.error('Vision Ingestion Error:', err);
     return NextResponse.json(
-      { error: err.message || 'An unexpected error occurred processing the file.' },
+      { error: err.message || 'Failed to process document with Gemini Vision.' },
       { status: 500 }
     );
   }
