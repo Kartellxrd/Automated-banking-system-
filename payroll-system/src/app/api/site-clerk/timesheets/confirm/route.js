@@ -3,7 +3,7 @@ import { supabase } from '@/lib/supabase';
 
 export async function POST(request) {
   try {
-    const { records, siteName, shiftDate } = await request.json();
+    const { records, siteName, shiftDate, documentUrl } = await request.json();
 
     if (!records || !Array.isArray(records) || records.length === 0) {
       return NextResponse.json({ error: 'No records provided to commit.' }, { status: 400 });
@@ -14,47 +14,97 @@ export async function POST(request) {
 
     const parseToIso = (dateStr, timeStr) => {
       try {
+        if (!timeStr || timeStr === '--:--') return null;
         const fullStr = `${dateStr} ${timeStr}`;
         const parsedDate = new Date(fullStr);
-        if (isNaN(parsedDate.getTime())) {
-          return new Date().toISOString();
-        }
+        if (isNaN(parsedDate.getTime())) return null;
         return parsedDate.toISOString();
       } catch {
-        return new Date().toISOString();
+        return null;
       }
     };
 
-    const shiftLogsPayload = records.map((rec) => {
+    const finalShiftLogs = [];
+
+    // Process each worker row
+    for (const rec of records) {
+      let activeEmployeeId = rec.employee_id;
+      let isNewWorker = false;
+
+      // 1. If worker does NOT exist in DB, insert them into `employees` table first
+      if (!activeEmployeeId || rec.is_unregistered) {
+        const rawName = (rec.worker_name || 'WalkOn Worker').trim();
+        const nameParts = rawName.split(' ');
+        const firstName = nameParts[0] || 'WalkOn';
+        const lastName = nameParts.slice(1).join(' ') || 'Worker';
+        const generatedCode = `TEMP-${Math.floor(1000 + Math.random() * 9000)}`;
+
+        const { data: newEmp, error: empInsertError } = await supabase
+          .from('employees')
+          .insert({
+            first_name: firstName,
+            last_name: lastName,
+            employee_code: generatedCode,
+            site_location: siteName || 'General Site',
+            status: 'active',
+            position: 'General Worker',
+          })
+          .select('id')
+          .single();
+
+        if (!empInsertError && newEmp) {
+          activeEmployeeId = newEmp.id;
+          isNewWorker = true;
+        } else {
+          console.error('Failed to create walk-on employee row:', empInsertError);
+        }
+      }
+
       const clockInIso = parseToIso(datePrefix, rec.timeInStr);
       const clockOutIso = parseToIso(datePrefix, rec.timeOutStr);
 
-      return {
-        employee_id: rec.employee_id || null,
+      let noteDetails = `Batch entry for ${siteName || 'Site'} on ${datePrefix}.`;
+      if (isNewWorker) {
+        noteDetails += ` [Auto-Registered Walk-On Worker: ${rec.worker_name}]`;
+      }
+      if (documentUrl) {
+        noteDetails += ` | Attached Sheet: ${documentUrl}`;
+      }
+
+      finalShiftLogs.push({
+        employee_id: activeEmployeeId,
+        shift_date: datePrefix,
         clock_in: clockInIso,
         clock_out: clockOutIso,
-        regular_hours: Number(rec.regular_hours) || 8.0,
+        regular_hours: Number(rec.regular_hours) || 0.0,
         overtime_hours: Number(rec.overtime_hours) || 0.0,
-        site_location: siteName || rec.site_location || 'Debete Site',
+        site_name: siteName || rec.site_location || 'General Site',
+        site_location: siteName || rec.site_location || 'General Site',
         status: rec.status || 'completed',
         logged_by: user?.id || null,
-        supervisor_notes: `Parsed from physical timesheet upload for ${siteName || 'site'}`,
-      };
-    });
+        is_unregistered: isNewWorker,
+        unregistered_worker_name: isNewWorker ? rec.worker_name : null,
+        supervisor_notes: noteDetails,
+      });
+    }
 
+    // 2. Commit logs to shift_logs with upsert logic
     const { data, error } = await supabase
       .from('shift_logs')
-      .insert(shiftLogsPayload)
+      .upsert(finalShiftLogs, {
+        onConflict: 'employee_id, shift_date',
+        ignoreDuplicates: false,
+      })
       .select();
 
     if (error) {
-      console.error('Database Error inserting shift_logs:', error);
+      console.error('Database Error committing shift_logs:', error);
       return NextResponse.json({ error: error.message }, { status: 400 });
     }
 
     return NextResponse.json({
       success: true,
-      insertedCount: data ? data.length : 0,
+      committedCount: data ? data.length : 0,
       logs: data,
     });
   } catch (err) {

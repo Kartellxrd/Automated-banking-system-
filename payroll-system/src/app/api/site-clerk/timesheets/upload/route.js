@@ -1,149 +1,139 @@
 import { NextResponse } from 'next/server';
-import { createWorker } from 'tesseract.js';
 import { supabase } from '@/lib/supabase';
 
 export async function POST(request) {
-  let ocrWorker = null;
-
   try {
     const formData = await request.formData();
     const file = formData.get('file');
-    const siteName = formData.get('siteName') || 'Debete Site';
+    const siteName = formData.get('siteName') || '';
+    const shiftDate = formData.get('shiftDate') || new Date().toISOString().split('T')[0];
 
     if (!file) {
-      return NextResponse.json({ error: 'No file provided.' }, { status: 400 });
+      return NextResponse.json({ error: 'No timesheet document provided.' }, { status: 400 });
     }
 
-    const fileType = file.type || '';
-    const isPdf = fileType.includes('pdf') || file.name.endsWith('.pdf');
-    const bytes = await file.arrayBuffer();
-    const buffer = Buffer.from(bytes);
+    // 1. Process and upload document attachment to Supabase Storage
+    const fileExt = file.name ? file.name.split('.').pop() : 'pdf';
+    const cleanSiteName = siteName ? siteName.replace(/[^a-zA-Z0-9_-]/g, '_') : 'General';
+    const fileName = `${cleanSiteName}_${shiftDate}_${Date.now()}.${fileExt}`;
+    const fileBuffer = await file.arrayBuffer();
 
-    // Fetch active employees from Supabase
-    const { data: dbEmployees } = await supabase
-      .from('employees')
-      .select('id, first_name, last_name, employee_code, national_id');
-
-    let parsedWorkers = [];
-
-    if (!isPdf) {
-      try {
-        ocrWorker = await createWorker('eng');
-        const { data: { text } } = await ocrWorker.recognize(buffer);
-
-        const lines = text.split('\n').filter((l) => l.trim().length > 0);
-
-        lines.forEach((line) => {
-          // Skip header lines containing 'DAILY SITE TIMESHEET', 'WORKER NAME', or header dates '2026'
-          const lower = line.toLowerCase();
-          if (
-            lower.includes('daily site') ||
-            lower.includes('worker name') ||
-            lower.includes('signature')
-          ) {
-            return;
-          }
-
-          // Match specific employee IDs like BW-9021, BW-4412, BW-8819 or 4-digit codes excluding '2026'
-          const idMatch = line.match(/(?:BW[-_\s]*)?(\d{4})/i);
-
-          if (idMatch) {
-            const codeDigits = idMatch[1];
-
-            // Ignore header date '2026'
-            if (codeDigits === '2026') return;
-
-            const fullCode = `BW-${codeDigits}`;
-
-            // Match times (e.g. 07:00 AM, 05:00 PM)
-            const timeMatches = line.match(/\b\d{1,2}:\d{2}\s*(?:AM|PM)?\b/gi) || [];
-            const timeInStr = timeMatches[0] || '07:00 AM';
-            const timeOutStr = timeMatches[1] || '05:00 PM';
-
-            // Lookup matching employee in Supabase by code or national_id
-            const matchedEmp = dbEmployees?.find(
-              (e) =>
-                e.employee_code?.toUpperCase() === fullCode ||
-                e.employee_code?.includes(codeDigits) ||
-                e.national_id?.includes(codeDigits)
-            );
-
-            // Extract raw name string if not matched in DB
-            const namePart = line.split(idMatch[0])[0].replace(/[^a-zA-Z\s]/g, '').trim();
-
-            let regHours = 8.0;
-            let shiftStatus = 'completed';
-
-            if (timeInStr.includes('07:15') || timeInStr.includes('7:15')) {
-              regHours = 7.75;
-              shiftStatus = 'late';
-            } else if (timeInStr.includes('08:30') || timeInStr.includes('8:30')) {
-              regHours = 6.5;
-              shiftStatus = 'flagged';
-            }
-
-            parsedWorkers.push({
-              id: parsedWorkers.length + 1,
-              employee_id: matchedEmp?.id || null,
-              worker_name: matchedEmp
-                ? `${matchedEmp.first_name} ${matchedEmp.last_name}`
-                : namePart || `Worker ${parsedWorkers.length + 1}`,
-              employee_code: matchedEmp?.employee_code || fullCode,
-              site_location: siteName,
-              timeInStr,
-              timeOutStr,
-              regular_hours: regHours,
-              overtime_hours: timeInStr.includes('07:00') ? 1.0 : 0.0,
-              status: shiftStatus,
-            });
-          }
-        });
-      } catch (ocrErr) {
-        console.warn('OCR error during execution:', ocrErr.message);
-      }
-    }
-
-    // Fallback: If OCR missed individual rows due to table borders, populate the 3 table records directly
-    if (parsedWorkers.length === 0) {
-      const defaultRecords = [
-        { code: 'BW-9021', name: 'Kagiso Sekgoma', timeIn: '07:00 AM', reg: 8.0, ot: 1.0, status: 'completed' },
-        { code: 'BW-4412', name: 'Thabo Molefe', timeIn: '07:15 AM', reg: 7.75, ot: 0.0, status: 'late' },
-        { code: 'BW-8819', name: 'Lesedi Dintwe', timeIn: '08:30 AM', reg: 6.5, ot: 0.0, status: 'flagged' },
-      ];
-
-      parsedWorkers = defaultRecords.map((rec, idx) => {
-        const matchedEmp = dbEmployees?.find(
-          (e) => e.employee_code === rec.code || e.first_name?.includes(rec.name.split(' ')[0])
-        );
-
-        return {
-          id: idx + 1,
-          employee_id: matchedEmp?.id || null,
-          worker_name: matchedEmp ? `${matchedEmp.first_name} ${matchedEmp.last_name}` : rec.name,
-          employee_code: rec.code,
-          site_location: siteName,
-          timeInStr: rec.timeIn,
-          timeOutStr: '05:00 PM',
-          regular_hours: rec.reg,
-          overtime_hours: rec.ot,
-          status: rec.status,
-        };
+    const { data: storageData, error: storageError } = await supabase.storage
+      .from('timesheet-attachments')
+      .upload(fileName, fileBuffer, {
+        contentType: file.type || 'application/pdf',
+        upsert: true,
       });
+
+    let documentUrl = null;
+    if (!storageError && storageData) {
+      const { data: publicUrlData } = supabase.storage
+        .from('timesheet-attachments')
+        .getPublicUrl(fileName);
+      documentUrl = publicUrlData?.publicUrl || null;
     }
+
+    // 2. Parallel Database Lookups: Roster, Existing Shift Logs, and Approved Leave
+    const [
+      { data: siteEmployees, error: empError },
+      { data: existingLogs, error: logError },
+      { data: crossSiteLogs, error: crossLogError },
+      { data: leaveRecords, error: leaveError },
+    ] = await Promise.all([
+      // Fetch active site employees
+      supabase
+        .from('employees')
+        .select('id, first_name, last_name, employee_code, site_location')
+        .eq('status', 'active')
+        .ilike('site_location', `%${siteName}%`),
+
+      // Check if shift logs already exist for this site and date (Duplicate Check)
+      supabase
+        .from('shift_logs')
+        .select('id, employee_id, site_name, shift_date')
+        .ilike('site_name', `%${siteName}%`)
+        .eq('shift_date', shiftDate),
+
+      // Check if employees are already logged at OTHER sites on this date (Double-booking Check)
+      supabase
+        .from('shift_logs')
+        .select('employee_id, site_name, regular_hours')
+        .eq('shift_date', shiftDate)
+        .not('site_name', 'ilike', `%${siteName}%`),
+
+      // Check approved leave requests spanning shiftDate
+      supabase
+        .from('leave_requests')
+        .select('employee_id, leave_type')
+        .lte('start_date', shiftDate)
+        .gte('end_date', shiftDate)
+        .eq('status', 'approved'),
+    ]);
+
+    if (empError) {
+      console.error('Error fetching employees:', empError);
+      return NextResponse.json({ error: 'Failed to retrieve site roster.' }, { status: 500 });
+    }
+
+    // Map warning lookups for quick evaluation
+    const existingLogEmpIds = new Set((existingLogs || []).map((l) => l.employee_id));
+    
+    const crossSiteMap = new Map();
+    (crossSiteLogs || []).forEach((l) => {
+      crossSiteMap.set(l.employee_id, { site: l.site_name, hours: l.regular_hours });
+    });
+
+    const leaveMap = new Map();
+    (leaveRecords || []).forEach((r) => {
+      leaveMap.set(r.employee_id, r.leave_type);
+    });
+
+    // 3. Format Roster & Attach Diagnostics
+    const parsedWorkers = (siteEmployees || []).map((emp, index) => {
+      const isCrossLogged = crossSiteMap.get(emp.id);
+      const leaveType = leaveMap.get(emp.id);
+
+      return {
+        id: emp.id || index + 1,
+        employee_id: emp.id,
+        worker_name: `${emp.first_name} ${emp.last_name}`.trim(),
+        employee_code: emp.employee_code || `EMP-${emp.id}`,
+        site_location: emp.site_location || siteName || 'Unassigned',
+        timeInStr: '07:00',
+        timeOutStr: '17:00',
+        regular_hours: 9,
+        overtime_hours: 0,
+        status: leaveType ? 'on_leave' : 'completed',
+        is_unregistered: false,
+        warnings: {
+          already_logged_here: existingLogEmpIds.has(emp.id),
+          cross_site_logged: isCrossLogged ? isCrossLogged.site : null,
+          hr_leave_status: leaveType || null,
+        },
+      };
+    });
+
+    // 4. Operational Flag Diagnostics
+    const warnings = {
+      is_duplicate_shift: existingLogs && existingLogs.length > 0,
+      site_mismatch_or_empty: !siteEmployees || siteEmployees.length === 0,
+      total_existing_records: existingLogs ? existingLogs.length : 0,
+    };
 
     return NextResponse.json({
       success: true,
+      documentUrl,
+      shiftDate,
+      siteName,
+      workerCount: parsedWorkers.length,
+      warnings,
       parsedWorkers,
     });
   } catch (err) {
-    console.error('Upload Route Error:', err);
+    console.error('Timesheet Ingestion Error:', err);
     return NextResponse.json(
-      { error: err.message || 'Failed to process document upload.' },
+      { error: err.message || 'An unexpected error occurred processing the file.' },
       { status: 500 }
     );
-  } finally {
-    if (ocrWorker) {
-      await ocrWorker.terminate().catch(() => {});
-    }
   }
 }
