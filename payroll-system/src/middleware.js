@@ -8,6 +8,10 @@ export async function middleware(request) {
     },
   });
 
+  const url = request.nextUrl.clone();
+  const pathname = url.pathname;
+
+  // Initialize Supabase Client
   const supabase = createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL,
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
@@ -18,9 +22,7 @@ export async function middleware(request) {
         },
         setAll(cookiesToSet) {
           cookiesToSet.forEach(({ name, value }) => request.cookies.set(name, value));
-          response = NextResponse.next({
-            request,
-          });
+          response = NextResponse.next({ request });
           cookiesToSet.forEach(({ name, value, options }) =>
             response.cookies.set(name, value, options)
           );
@@ -29,19 +31,28 @@ export async function middleware(request) {
     }
   );
 
-  const { data: { user } } = await supabase.auth.getUser();
-  const url = request.nextUrl.clone();
-  const pathname = url.pathname;
+  let user = null;
+  try {
+    const { data } = await supabase.auth.getUser();
+    user = data?.user || null;
+  } catch (err) {
+    console.error('Middleware Supabase Auth Error:', err);
+  }
 
-  // 1. Unauthenticated user trying to access any protected route
+  // 1. Root route handling: send unauthenticated users to /login immediately
+  if (pathname === '/') {
+    url.pathname = user ? '/dashboard' : '/login';
+    return NextResponse.redirect(url);
+  }
+
+  // 2. Unauthenticated user attempting to access protected routes
   if (pathname.startsWith('/dashboard') && !user) {
     url.pathname = '/login';
     return NextResponse.redirect(url);
   }
 
-  // 2. Authenticated user logic
+  // 3. Authenticated user logic
   if (user) {
-    // Fetch profile role safely
     let role = null;
     try {
       const { data: profile } = await supabase
@@ -55,27 +66,26 @@ export async function middleware(request) {
       console.error('Middleware profile fetch error:', err);
     }
 
-    // Default fallback role if database error or missing profile row
     const targetDashboard = role ? `/dashboard/${role.replace('_', '-')}` : '/dashboard/admin';
 
-    // A. Logged-in user visiting /login -> redirect to their role dashboard
+    // Logged-in user visiting /login -> send to dashboard
     if (pathname === '/login') {
       url.pathname = targetDashboard;
       return NextResponse.redirect(url);
     }
 
-    // B. Logged-in user visiting base /dashboard -> redirect to specific dashboard
+    // Logged-in user visiting /dashboard -> send to role dashboard
     if (pathname === '/dashboard' || pathname === '/dashboard/') {
       url.pathname = targetDashboard;
       return NextResponse.redirect(url);
     }
 
-    // C. Role-based permission checks (Admins & CEOs bypass all restrictions)
+    // Admins & CEOs bypass restrictions
     if (role === 'admin' || role === 'ceo') {
       return response;
     }
 
-    // Restrict non-admin roles from accessing other department routes
+    // Strict role boundary checks
     if (pathname.startsWith('/dashboard/ceo') && role !== 'ceo') {
       url.pathname = targetDashboard;
       return NextResponse.redirect(url);
@@ -106,5 +116,5 @@ export async function middleware(request) {
 }
 
 export const config = {
-  matcher: ['/dashboard/:path*', '/login'],
+  matcher: ['/', '/dashboard/:path*', '/login'],
 };
