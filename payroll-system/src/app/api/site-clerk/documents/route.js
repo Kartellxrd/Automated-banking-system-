@@ -1,7 +1,24 @@
 import { NextResponse } from 'next/server';
 import { supabase } from '@/lib/supabase';
 
-// GET: Load active sites, fetch site-assigned employees, and list documents
+// Map UI display labels to exact PostgreSQL constraint values
+const DOC_TYPE_MAP = {
+  'Sick Note': 'sick_note',
+  'Medical Certificate': 'medical_clearance',
+  'Medical Clearance': 'medical_clearance',
+  'Safety Cert': 'safety_cert',
+  'Safety Certificate': 'safety_cert',
+  'Contract': 'contract',
+  'Omang': 'omang',
+  'Passport': 'passport',
+  'Resume': 'resume',
+  'Certificate': 'certificate',
+  'Drivers License': 'drivers_license',
+  'Academic Transcript': 'academic_transcript',
+  'Other': 'other',
+};
+
+// GET: Fetch sites, employees for the selected site, and document logs safely
 export async function GET(request) {
   try {
     const { searchParams } = new URL(request.url);
@@ -22,86 +39,85 @@ export async function GET(request) {
 
     if (empErr) throw empErr;
 
-    // 3. Fetch documents for these employees
-    const { data: documents, error: docErr } = await supabase
-      .from('employee_documents')
-      .select(`
-        id,
-        document_type,
-        file_path,
-        created_at,
-        employee_id,
-        employees (
-          first_name,
-          last_name,
-          employee_code,
-          assigned_site
-        )
-      `)
-      .order('created_at', { ascending: false });
+    // 3. Safe Document Retrieval matching exact schema columns
+    let filteredDocs = [];
+    try {
+      const { data: documents, error: docErr } = await supabase
+        .from('employee_documents')
+        .select('*')
+        .order('created_at', { ascending: false });
 
-    if (docErr) throw docErr;
+      if (!docErr && documents && documents.length > 0) {
+        filteredDocs = documents.map((doc) => {
+          let publicUrl = doc.file_url || '';
+          if (!publicUrl && doc.file_name) {
+            const { data: urlData } = supabase.storage
+              .from('sick-notes')
+              .getPublicUrl(doc.file_name);
+            publicUrl = urlData?.publicUrl || '';
+          }
 
-    // Build document objects and generate public URLs from 'sick-notes' bucket
-    const filteredDocs = (documents || [])
-      .filter((doc) => doc.employees?.assigned_site === site)
-      .map((doc) => {
-        let publicUrl = '';
-        if (doc.file_path) {
-          const { data: urlData } = supabase.storage
-            .from('sick-notes')
-            .getPublicUrl(doc.file_path);
-          publicUrl = urlData?.publicUrl || '';
-        }
+          const matchedEmp = employees.find((e) => e.id === doc.employee_id);
 
-        return {
-          id: doc.id,
-          document_type: doc.document_type,
-          document_url: publicUrl,
-          file_path: doc.file_path,
-          created_at: doc.created_at,
-          employee_id: doc.employee_id,
-          employee_name: doc.employees
-            ? `${doc.employees.first_name} ${doc.employees.last_name}`
-            : 'Site Worker',
-          employee_code: doc.employees?.employee_code || 'EMP',
-        };
-      });
+          return {
+            id: doc.id,
+            document_type: doc.document_type || 'sick_note',
+            document_url: publicUrl,
+            file_path: doc.file_name || '',
+            created_at: doc.created_at || doc.uploaded_at,
+            employee_id: doc.employee_id,
+            employee_name: matchedEmp
+              ? `${matchedEmp.first_name} ${matchedEmp.last_name}`
+              : 'Site Worker',
+            employee_code: matchedEmp?.employee_code || 'EMP',
+          };
+        });
+      }
+    } catch (docFetchErr) {
+      console.warn('Notice: Could not load documents or bucket is empty:', docFetchErr.message);
+      filteredDocs = [];
+    }
 
     return NextResponse.json({
       success: true,
       sites: (sitesData || []).map((s) => s.site_name),
       employees: (employees || []).map((e) => ({
         ...e,
-        job_title: e.job_role, // frontend compatibility
+        job_title: e.job_role, // frontend dropdown support
       })),
       documents: filteredDocs,
     });
   } catch (err) {
-    console.error('Error in documents GET route:', err);
+    console.error('Error fetching site documents data:', err);
     return NextResponse.json(
-      { success: false, error: err.message || 'Failed to fetch site document data.' },
+      { success: false, error: err.message || 'Failed to fetch site data.' },
       { status: 500 }
     );
   }
 }
 
-// POST: Direct file upload to 'sick-notes' bucket & record metadata in employee_documents
+// POST: Direct file upload to 'sick-notes' storage bucket
 export async function POST(request) {
   try {
     const formData = await request.formData();
     const file = formData.get('file');
     const employeeId = formData.get('employee_id');
-    const documentType = formData.get('document_type');
+    const rawDocumentType = formData.get('document_type');
 
-    if (!file || !employeeId || !documentType) {
+    if (!file || !employeeId || !rawDocumentType) {
       return NextResponse.json(
         { success: false, error: 'File, employee ID, and document type are required.' },
         { status: 400 }
       );
     }
 
-    // Prepare buffer and path
+    // Convert document type string to match DB CHECK constraint
+    const normalizedDocType =
+      DOC_TYPE_MAP[rawDocumentType] ||
+      rawDocumentType.toString().trim().toLowerCase().replace(/\s+/g, '_') ||
+      'sick_note';
+
+    // Prepare buffer and bucket path
     const fileExt = file.name.split('.').pop();
     const fileName = `${employeeId}/${Date.now()}.${fileExt}`;
     const arrayBuffer = await file.arrayBuffer();
@@ -117,13 +133,22 @@ export async function POST(request) {
 
     if (uploadErr) throw uploadErr;
 
-    // Record document metadata in database
+    // Retrieve public URL
+    const { data: urlData } = supabase.storage
+      .from('sick-notes')
+      .getPublicUrl(fileName);
+
+    const publicUrl = urlData?.publicUrl || '';
+
+    // Insert metadata record using exact schema column names and normalized enum string
     const { data: docRecord, error: dbErr } = await supabase
       .from('employee_documents')
       .insert({
         employee_id: employeeId,
-        document_type: documentType,
-        file_path: fileName,
+        document_type: normalizedDocType,
+        file_name: fileName,
+        file_url: publicUrl,
+        mime_type: file.type || 'application/pdf',
       })
       .select()
       .single();
@@ -132,7 +157,7 @@ export async function POST(request) {
 
     return NextResponse.json({
       success: true,
-      message: 'Document successfully saved to sick-notes bucket.',
+      message: 'Document successfully uploaded to sick-notes bucket.',
       data: docRecord,
     });
   } catch (err) {
@@ -144,7 +169,7 @@ export async function POST(request) {
   }
 }
 
-// DELETE: Remove document file from bucket and DB entry
+// DELETE: Remove document file from bucket and DB table
 export async function DELETE(request) {
   try {
     const { searchParams } = new URL(request.url);
@@ -154,16 +179,14 @@ export async function DELETE(request) {
       return NextResponse.json({ success: false, error: 'Document ID required.' }, { status: 400 });
     }
 
-    const { data: doc, error: fetchErr } = await supabase
+    const { data: doc } = await supabase
       .from('employee_documents')
-      .select('file_path')
+      .select('file_name')
       .eq('id', docId)
-      .single();
+      .maybeSingle();
 
-    if (fetchErr) throw fetchErr;
-
-    if (doc?.file_path) {
-      await supabase.storage.from('sick-notes').remove([doc.file_path]);
+    if (doc?.file_name) {
+      await supabase.storage.from('sick-notes').remove([doc.file_name]);
     }
 
     const { error: deleteErr } = await supabase
