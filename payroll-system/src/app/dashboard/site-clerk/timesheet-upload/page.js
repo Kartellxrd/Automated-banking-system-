@@ -12,7 +12,10 @@ import {
   Send,
   Calendar,
   Users,
-  AlertTriangle
+  AlertTriangle,
+  MapPin,
+  Printer,
+  Clock
 } from 'lucide-react';
 import Link from 'next/link';
 import SiteClerkSideNav from '@/components/site-clerk/SiteClerkSideNav';
@@ -21,7 +24,12 @@ import SiteClerkNavbar from '@/components/site-clerk/SiteClerkNavbar';
 function UploadContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const siteParam = searchParams.get('site') || 'Debete Site';
+  const initialSiteParam = searchParams.get('site') || '';
+
+  // Dynamic Site State (Fetched from API instead of hardcoded)
+  const [sites, setSites] = useState([]);
+  const [sitesLoading, setSitesLoading] = useState(true);
+  const [activeSite, setActiveSite] = useState(initialSiteParam);
 
   const [shiftDate, setShiftDate] = useState('2026-08-24');
   const [selectedFile, setSelectedFile] = useState(null);
@@ -33,11 +41,46 @@ function UploadContent() {
   const [submitSuccess, setSubmitSuccess] = useState(false);
   const [siteMismatchCount, setSiteMismatchCount] = useState(0);
 
+  // 1. Fetch Dynamic Sites List from API (Same pattern as Dashboard)
+  useEffect(() => {
+    async function fetchSites() {
+      try {
+        setSitesLoading(true);
+        const res = await fetch('/api/site-clerk/dashboard');
+        const data = await res.json();
+
+        if (res.ok && data.sites?.length > 0) {
+          setSites(data.sites);
+          // If no site parameter was provided in URL, fallback to default selected site from API
+          if (!initialSiteParam) {
+            const defaultSite = data.selectedSite || data.sites[0].name;
+            setActiveSite(defaultSite);
+          }
+        } else {
+          console.error('Failed to fetch dynamic site list:', data.error);
+        }
+      } catch (err) {
+        console.error('Error connecting to sites API:', err);
+      } fontFinally: {
+        setSitesLoading(false);
+      }
+    }
+
+    fetchSites();
+  }, [initialSiteParam]);
+
+  // Clean up Object URL preview when file changes
   useEffect(() => {
     return () => {
       if (filePreviewUrl) URL.revokeObjectURL(filePreviewUrl);
     };
   }, [filePreviewUrl]);
+
+  // Site selection handler
+  const handleSiteChange = (newSite) => {
+    setActiveSite(newSite);
+    router.replace(`?site=${encodeURIComponent(newSite)}`);
+  };
 
   const handleFileSelect = (e) => {
     const file = e.target.files[0];
@@ -62,7 +105,7 @@ function UploadContent() {
       setUploading(true);
       const formData = new FormData();
       formData.append('file', selectedFile);
-      formData.append('siteName', siteParam);
+      formData.append('siteName', activeSite);
       formData.append('shiftDate', shiftDate);
 
       const res = await fetch('/api/site-clerk/timesheets/upload', {
@@ -77,14 +120,13 @@ function UploadContent() {
         setParsedData(workers);
         setDocumentUrl(data.documentUrl || null);
 
-        // Check for cross-site allocation warnings
         const mismatches = workers.filter(
-          (w) => w.assigned_site && w.assigned_site.toLowerCase() !== siteParam.toLowerCase()
+          (w) => w.assigned_site && w.assigned_site.toLowerCase() !== activeSite.toLowerCase()
         ).length;
         setSiteMismatchCount(mismatches);
       } else {
         console.error('Failed to load roster:', data.error);
-        alert(data.error || 'Failed to upload timesheet.');
+        alert(data.error || 'Failed to process timesheet upload.');
       }
     } catch (err) {
       console.error('Error attaching file & fetching roster:', err);
@@ -93,22 +135,21 @@ function UploadContent() {
     }
   };
 
-  // Helper to calculate Reg & Overtime hours automatically when clock-out changes
+  // Detailed Hours Calculation Engine
   const calculateHoursFromTimes = (timeInStr, timeOutStr) => {
     try {
       if (!timeOutStr || timeOutStr === '--:--') return { reg: 0, ot: 0 };
       const [outHours, outMins] = timeOutStr.split(':').map(Number);
       if (isNaN(outHours)) return { reg: 8.0, ot: 0.0 };
 
-      // Standard finish is 16:00 (4:00 PM)
       const finishDecimal = outHours + (outMins || 0) / 60;
-      const standardFinishDecimal = 16.0;
+      const standardFinishDecimal = 16.0; // Standard 8-hour cutoff (e.g. 16:00)
 
       if (finishDecimal > standardFinishDecimal) {
         const ot = Number((finishDecimal - standardFinishDecimal).toFixed(2));
         return { reg: 8.0, ot };
       }
-      return { reg: Number(Math.min(finishDecimal - 7.0, 8.0).toFixed(2)), ot: 0.0 };
+      return { reg: Number(Math.max(0, Math.min(finishDecimal - 7.0, 8.0)).toFixed(2)), ot: 0.0 };
     } catch {
       return { reg: 8.0, ot: 0.0 };
     }
@@ -121,7 +162,6 @@ function UploadContent() {
 
         const updated = { ...worker, [field]: value };
 
-        // Handle Status Exceptions
         if (field === 'status' && ['sick_leave', 'awol', 'on_leave'].includes(value)) {
           updated.timeInStr = '--:--';
           updated.timeOutStr = '--:--';
@@ -129,7 +169,6 @@ function UploadContent() {
           updated.overtime_hours = 0;
         }
 
-        // Handle Automatic OT Calculation on Time Out Change
         if (field === 'timeOutStr') {
           const { reg, ot } = calculateHoursFromTimes(updated.timeInStr, value);
           updated.regular_hours = reg;
@@ -151,7 +190,7 @@ function UploadContent() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           parsedWorkers: parsedData,
-          siteName: siteParam,
+          siteName: activeSite,
           shiftDate: shiftDate,
           documentUrl: documentUrl,
         }),
@@ -161,7 +200,6 @@ function UploadContent() {
 
       if (res.ok) {
         setSubmitSuccess(true);
-        // Phase 2 Auto-redirect to Roster Dashboard
         if (data.redirectUrl) {
           router.push(data.redirectUrl);
         }
@@ -176,12 +214,60 @@ function UploadContent() {
     }
   };
 
+  const handleExportPDF = () => {
+    window.print();
+  };
+
+  // Aggregate Hours Calculations
+  const totalRegHours = parsedData
+    ? parsedData.reduce((acc, w) => acc + (Number(w.regular_hours) || 0), 0)
+    : 0;
+  const totalOtHours = parsedData
+    ? parsedData.reduce((acc, w) => acc + (Number(w.overtime_hours) || 0), 0)
+    : 0;
+  const totalHoursCombined = totalRegHours + totalOtHours;
+
   return (
     <div className="min-h-screen bg-slate-100 text-slate-900 flex flex-col lg:flex-row font-sans">
       <SiteClerkSideNav />
 
       <main className="flex-1 p-4 sm:p-6 lg:p-8 space-y-6 overflow-x-hidden">
-        <SiteClerkNavbar title="Timesheet Ingestion" siteName={siteParam} />
+        <SiteClerkNavbar title="Timesheet Ingestion" siteName={activeSite || 'Loading...'} />
+
+        {/* Dynamic Site Selector Banner */}
+        <div className="bg-white border border-slate-200 rounded-2xl p-4 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div className="flex items-center gap-2.5">
+            <div className="p-2 bg-indigo-50 text-indigo-600 rounded-xl">
+              <MapPin className="w-5 h-5" />
+            </div>
+            <div>
+              <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Active Location</p>
+              <p className="text-sm font-bold text-slate-800">{activeSite || 'Fetching site location...'}</p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <span className="text-xs font-semibold text-slate-500 hidden md:inline">Switch Station:</span>
+            {sitesLoading ? (
+              <div className="flex items-center gap-2 text-xs text-slate-500 bg-slate-50 border border-slate-200 rounded-xl px-3 py-2">
+                <Loader2 className="w-3.5 h-3.5 animate-spin text-indigo-600" />
+                <span>Loading sites...</span>
+              </div>
+            ) : (
+              <select
+                value={activeSite}
+                onChange={(e) => handleSiteChange(e.target.value)}
+                className="text-xs font-bold bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-slate-800 outline-none focus:border-indigo-500 cursor-pointer"
+              >
+                {sites.map((site) => (
+                  <option key={site.id || site.name} value={site.name}>
+                    {site.name}
+                  </option>
+                ))}
+              </select>
+            )}
+          </div>
+        </div>
 
         <div>
           <Link
@@ -194,13 +280,13 @@ function UploadContent() {
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-          {/* File Upload Section */}
+          {/* Left Column: File Controls & Dynamic Preview */}
           <div className="lg:col-span-5 space-y-4">
             <div className="bg-white border border-slate-200 rounded-3xl p-5 shadow-xs space-y-4">
               <div>
                 <h3 className="text-sm font-bold text-slate-900">Attach Physical Sheet</h3>
                 <p className="text-xs text-slate-500 mt-0.5">
-                  Upload scanned JPEG, PNG, or PDF sheet for audit records ({siteParam}).
+                  Upload scanned JPEG, PNG, or PDF sheet for audit records ({activeSite}).
                 </p>
               </div>
 
@@ -257,40 +343,60 @@ function UploadContent() {
               )}
             </div>
 
-            {/* Document Preview Box */}
-            {filePreviewUrl && (
-              <div className="bg-white border border-slate-200 rounded-3xl p-4 shadow-xs space-y-2">
-                <div className="flex items-center justify-between text-xs font-bold text-slate-700">
-                  <span className="flex items-center gap-1.5">
-                    <Eye className="w-4 h-4 text-indigo-600" /> Attached Sheet Preview
-                  </span>
-                </div>
-                <div className="rounded-2xl overflow-hidden border border-slate-200 bg-slate-900 flex justify-center max-h-80">
+            {/* Image Viewer Container */}
+            <div className="bg-white border border-slate-200 rounded-3xl p-4 shadow-xs space-y-3">
+              <div className="flex items-center justify-between text-xs font-bold text-slate-700">
+                <span className="flex items-center gap-1.5">
+                  <Eye className="w-4 h-4 text-indigo-600" /> Sheet Preview ({activeSite})
+                </span>
+                <span className="text-[10px] font-mono text-slate-400 bg-slate-100 px-2 py-0.5 rounded">
+                  {shiftDate}
+                </span>
+              </div>
+              <div className="rounded-2xl overflow-hidden border border-slate-200 bg-slate-900 flex items-center justify-center min-h-64 max-h-96">
+                {filePreviewUrl ? (
                   <img
                     src={filePreviewUrl}
-                    alt="Timesheet Preview"
+                    alt={`Timesheet ${activeSite} ${shiftDate}`}
                     className="object-contain w-full h-full"
                   />
-                </div>
+                ) : (
+                  <div className="text-center p-6 space-y-2">
+                    <FileText className="w-8 h-8 text-slate-600 mx-auto" />
+                    <p className="text-xs text-slate-400 font-medium">No document loaded for preview</p>
+                    <p className="text-[10px] text-slate-500">Select an image file above to render target sheet</p>
+                  </div>
+                )}
               </div>
-            )}
+            </div>
           </div>
 
-          {/* Verification Table Side */}
+          {/* Right Column: Verification & Hours Summary */}
           <div className="lg:col-span-7">
             <div className="bg-white border border-slate-200 rounded-3xl p-5 shadow-xs space-y-5">
-              <div className="flex items-center justify-between border-b border-slate-100 pb-4">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 pb-4">
                 <div>
                   <h3 className="text-sm font-bold text-slate-900">Shift Attendance Verification</h3>
                   <p className="text-xs text-slate-500">
                     Verify pre-filled worker list against attached paper sheet and adjust exceptions.
                   </p>
                 </div>
-                {parsedData && (
-                  <span className="text-xs font-bold bg-indigo-50 text-indigo-700 px-3 py-1 rounded-full border border-indigo-200">
-                    {parsedData.length} Roster Workers
-                  </span>
-                )}
+                <div className="flex items-center gap-2">
+                  {parsedData && (
+                    <button
+                      onClick={handleExportPDF}
+                      className="inline-flex items-center gap-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold px-3 py-1.5 rounded-xl transition cursor-pointer"
+                    >
+                      <Printer className="w-3.5 h-3.5" />
+                      <span>Export PDF</span>
+                    </button>
+                  )}
+                  {parsedData && (
+                    <span className="text-xs font-bold bg-indigo-50 text-indigo-700 px-3 py-1.5 rounded-xl border border-indigo-200">
+                      {parsedData.length} Workers
+                    </span>
+                  )}
+                </div>
               </div>
 
               {/* Site Mismatch Warning Banner */}
@@ -298,7 +404,7 @@ function UploadContent() {
                 <div className="p-3 bg-amber-50 border border-amber-200 rounded-2xl flex items-center gap-2.5 text-xs text-amber-800 font-medium">
                   <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0" />
                   <span>
-                    <strong>{siteMismatchCount} worker(s)</strong> on this sheet are mapped to a different site than <strong>{siteParam}</strong>. Confirming will record them under this active station.
+                    <strong>{siteMismatchCount} worker(s)</strong> on this sheet are mapped to a different site than <strong>{activeSite}</strong>. Confirming will record them under this active station.
                   </span>
                 </div>
               )}
@@ -315,6 +421,22 @@ function UploadContent() {
                 </div>
               ) : parsedData ? (
                 <div className="space-y-4">
+                  {/* Hours Breakdown Summary Banner */}
+                  <div className="grid grid-cols-3 gap-3 bg-slate-50 border border-slate-200 rounded-2xl p-3 text-center">
+                    <div>
+                      <p className="text-[10px] font-bold text-slate-400 uppercase">Regular Hours</p>
+                      <p className="text-sm font-bold text-slate-800">{totalRegHours.toFixed(1)}h</p>
+                    </div>
+                    <div className="border-x border-slate-200">
+                      <p className="text-[10px] font-bold text-slate-400 uppercase">Overtime Hours</p>
+                      <p className="text-sm font-bold text-amber-600">+{totalOtHours.toFixed(1)}h</p>
+                    </div>
+                    <div>
+                      <p className="text-[10px] font-bold text-slate-400 uppercase">Total Combined</p>
+                      <p className="text-sm font-bold text-indigo-600">{totalHoursCombined.toFixed(1)}h</p>
+                    </div>
+                  </div>
+
                   <div className="overflow-x-auto border border-slate-200 rounded-2xl">
                     <table className="w-full text-left text-xs text-slate-700">
                       <thead className="bg-slate-50 border-b border-slate-200 text-slate-500 font-bold uppercase tracking-wider text-[10px]">
@@ -420,7 +542,7 @@ function UploadContent() {
                   </div>
                   <p className="text-xs font-bold text-slate-700">No Roster Loaded</p>
                   <p className="text-[11px] text-slate-400 max-w-xs">
-                    Select a scanned timesheet photo on the left and click "Load Site Roster & Review" to pull pre-filled active workers for this site.
+                    Select a scanned timesheet photo on the left and click "Load Site Roster & Review" to pull pre-filled active workers for {activeSite || 'active site'}.
                   </p>
                 </div>
               )}
