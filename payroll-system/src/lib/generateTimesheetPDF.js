@@ -1,8 +1,11 @@
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 
-export function generateTimesheetPDF({ siteName, shiftDate, roster, isLocked }) {
+export function generateTimesheetPDF({ siteName = 'Site', shiftDate = '', roster = [], workers = [], isLocked = false }) {
   const doc = new jsPDF('portrait', 'mm', 'a4');
+
+  // Normalize input data: accept either 'roster' or 'workers' prop fallback
+  const dataset = Array.isArray(roster) && roster.length > 0 ? roster : workers;
 
   // --- 1. Header & Site Branding ---
   doc.setFillColor(15, 23, 42); // Dark slate background header
@@ -18,11 +21,18 @@ export function generateTimesheetPDF({ siteName, shiftDate, roster, isLocked }) 
   doc.text(`Site / Location: ${siteName.toUpperCase()}`, 14, 23);
   doc.text(`Date: ${shiftDate}`, 140, 23);
 
-  // --- 2. Shift Metadata & Calculations ---
-  // Ensure strict numerical calculations
-  const totalEmployees = roster.length;
-  const totalRegHours = roster.reduce((sum, w) => sum + (parseFloat(w.regHours) || 0), 0);
-  const totalOtHours = roster.reduce((sum, w) => sum + (parseFloat(w.otHours) || 0), 0);
+  // --- 2. Shift Metadata & Field Schema Normalization ---
+  const totalEmployees = dataset.length;
+
+  // Calculate totals supporting both schema variants (regHours vs regular_hours, otHours vs overtime_hours)
+  const totalRegHours = dataset.reduce(
+    (sum, w) => sum + (parseFloat(w.regular_hours ?? w.regHours) || 0),
+    0
+  );
+  const totalOtHours = dataset.reduce(
+    (sum, w) => sum + (parseFloat(w.overtime_hours ?? w.otHours) || 0),
+    0
+  );
   const totalCombinedHours = totalRegHours + totalOtHours;
 
   doc.setTextColor(30, 41, 59);
@@ -49,20 +59,30 @@ export function generateTimesheetPDF({ siteName, shiftDate, roster, isLocked }) 
   });
 
   // --- 3. Detailed Attendance Table ---
-  const tableRows = roster.map((worker) => {
-    const reg = parseFloat(worker.regHours) || 0;
-    const ot = parseFloat(worker.otHours) || 0;
+  const tableRows = dataset.map((worker) => {
+    // Schema field resolutions
+    const empCode = worker.employee_code || worker.code || 'N/A';
+    const empName = worker.worker_name || worker.name || 'Unknown';
+    const empRole = worker.role || worker.job_role || 'General Worker';
+
+    const timeIn = worker.timeInStr || worker.clockIn || '--:--';
+    const timeOut = worker.timeOutStr || worker.clockOut || '--:--';
+
+    const reg = parseFloat(worker.regular_hours ?? worker.regHours) || 0;
+    const ot = parseFloat(worker.overtime_hours ?? worker.otHours) || 0;
     const total = reg + ot;
 
+    const statusNote = worker.status || worker.auditNote || '-';
+
     return [
-      worker.code || 'N/A',
-      worker.name,
-      worker.role || 'General Worker',
-      `${worker.clockIn || '--'} - ${worker.clockOut || '--'}`,
+      empCode,
+      empName,
+      empRole,
+      `${timeIn} - ${timeOut}`,
       reg.toFixed(2),
       ot.toFixed(2),
       total.toFixed(2),
-      worker.auditNote || worker.status || '-',
+      statusNote,
     ];
   });
 

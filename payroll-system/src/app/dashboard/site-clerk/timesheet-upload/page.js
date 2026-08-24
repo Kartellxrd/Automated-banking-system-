@@ -14,13 +14,13 @@ import {
   Users,
   AlertTriangle,
   MapPin,
-  Printer
+  Printer,
+  Download,
+  ExternalLink
 } from 'lucide-react';
 import Link from 'next/link';
 import SiteClerkSideNav from '@/components/site-clerk/SiteClerkSideNav';
 import SiteClerkNavbar from '@/components/site-clerk/SiteClerkNavbar';
-
-// Import your PDF generation utility function from the lib folder
 import { generateTimesheetPDF } from '@/lib/generateTimesheetPDF';
 
 function UploadContent() {
@@ -28,7 +28,6 @@ function UploadContent() {
   const searchParams = useSearchParams();
   const initialSiteParam = searchParams.get('site') || '';
 
-  // Dynamic Site State (Fetched from API instead of hardcoded)
   const [sites, setSites] = useState([]);
   const [sitesLoading, setSitesLoading] = useState(true);
   const [activeSite, setActiveSite] = useState(initialSiteParam);
@@ -37,14 +36,17 @@ function UploadContent() {
   const [selectedFile, setSelectedFile] = useState(null);
   const [filePreviewUrl, setFilePreviewUrl] = useState(null);
   const [documentUrl, setDocumentUrl] = useState(null);
+  
   const [uploading, setUploading] = useState(false);
   const [committing, setCommitting] = useState(false);
   const [exportingPdf, setExportingPdf] = useState(false);
+  const [fetchingExisting, setFetchingExisting] = useState(false);
+  
   const [parsedData, setParsedData] = useState(null);
   const [submitSuccess, setSubmitSuccess] = useState(false);
   const [siteMismatchCount, setSiteMismatchCount] = useState(0);
 
-  // 1. Fetch Dynamic Sites List from API
+  // 1. Fetch Dynamic Sites List
   useEffect(() => {
     async function fetchSites() {
       try {
@@ -58,8 +60,6 @@ function UploadContent() {
             const defaultSite = data.selectedSite || data.sites[0].name;
             setActiveSite(defaultSite);
           }
-        } else {
-          console.error('Failed to fetch dynamic site list:', data.error);
         }
       } catch (err) {
         console.error('Error connecting to sites API:', err);
@@ -71,14 +71,47 @@ function UploadContent() {
     fetchSites();
   }, [initialSiteParam]);
 
-  // Clean up Object URL preview when file changes
+  // 2. Fetch Existing Uploaded Document and Log Data for activeSite & shiftDate
+  useEffect(() => {
+    if (!activeSite || !shiftDate) return;
+
+    async function fetchExistingTimesheet() {
+      try {
+        setFetchingExisting(true);
+        const res = await fetch(
+          `/api/site-clerk/timesheets?site=${encodeURIComponent(activeSite)}&date=${shiftDate}`
+        );
+        const data = await res.json();
+
+        if (res.ok && data.success) {
+          if (data.workers && data.workers.length > 0) {
+            setParsedData(data.workers);
+          }
+          if (data.documentUrl) {
+            setDocumentUrl(data.documentUrl);
+          } else {
+            setDocumentUrl(null);
+          }
+        }
+      } catch (err) {
+        console.error('Error loading stored timesheet:', err);
+      } finally {
+        setFetchingExisting(false);
+      }
+    }
+
+    fetchExistingTimesheet();
+  }, [activeSite, shiftDate]);
+
+  // Handle preview URL cleanup
   useEffect(() => {
     return () => {
-      if (filePreviewUrl) URL.revokeObjectURL(filePreviewUrl);
+      if (filePreviewUrl && filePreviewUrl.startsWith('blob:')) {
+        URL.revokeObjectURL(filePreviewUrl);
+      }
     };
   }, [filePreviewUrl]);
 
-  // Site selection handler
   const handleSiteChange = (newSite) => {
     setActiveSite(newSite);
     router.replace(`?site=${encodeURIComponent(newSite)}`);
@@ -88,12 +121,11 @@ function UploadContent() {
     const file = e.target.files[0];
     if (file) {
       setSelectedFile(file);
-      setParsedData(null);
       setSubmitSuccess(false);
-      setSiteMismatchCount(0);
 
       if (file.type.startsWith('image/')) {
-        setFilePreviewUrl(URL.createObjectURL(file));
+        const localUrl = URL.createObjectURL(file);
+        setFilePreviewUrl(localUrl);
       } else {
         setFilePreviewUrl(null);
       }
@@ -120,14 +152,15 @@ function UploadContent() {
       if (res.ok) {
         const workers = data.parsedWorkers || [];
         setParsedData(workers);
-        setDocumentUrl(data.documentUrl || null);
+        if (data.documentUrl) {
+          setDocumentUrl(data.documentUrl);
+        }
 
         const mismatches = workers.filter(
           (w) => w.assigned_site && w.assigned_site.toLowerCase() !== activeSite.toLowerCase()
         ).length;
         setSiteMismatchCount(mismatches);
       } else {
-        console.error('Failed to load roster:', data.error);
         alert(data.error || 'Failed to process timesheet upload.');
       }
     } catch (err) {
@@ -137,7 +170,6 @@ function UploadContent() {
     }
   };
 
-  // Detailed Hours Calculation Engine
   const calculateHoursFromTimes = (timeInStr, timeOutStr) => {
     try {
       if (!timeOutStr || timeOutStr === '--:--') return { reg: 0, ot: 0 };
@@ -194,7 +226,7 @@ function UploadContent() {
           parsedWorkers: parsedData,
           siteName: activeSite,
           shiftDate: shiftDate,
-          documentUrl: documentUrl,
+          documentUrl: documentUrl || filePreviewUrl,
         }),
       });
 
@@ -206,7 +238,6 @@ function UploadContent() {
           router.push(data.redirectUrl);
         }
       } else {
-        console.error('Failed to commit shift logs:', data.error);
         alert(`Error locking shift logs: ${data.error}`);
       }
     } catch (err) {
@@ -216,7 +247,6 @@ function UploadContent() {
     }
   };
 
-  // Export PDF Handler
   const handleExportPDF = async () => {
     if (!parsedData || parsedData.length === 0) return;
     try {
@@ -239,7 +269,6 @@ function UploadContent() {
     }
   };
 
-  // Aggregate Hours Calculations
   const totalRegHours = parsedData
     ? parsedData.reduce((acc, w) => acc + (Number(w.regular_hours) || 0), 0)
     : 0;
@@ -248,6 +277,8 @@ function UploadContent() {
     : 0;
   const totalHoursCombined = totalRegHours + totalOtHours;
 
+  const activeDisplayUrl = filePreviewUrl || documentUrl;
+
   return (
     <div className="min-h-screen bg-slate-100 text-slate-900 flex flex-col lg:flex-row font-sans">
       <SiteClerkSideNav />
@@ -255,7 +286,6 @@ function UploadContent() {
       <main className="flex-1 p-4 sm:p-6 lg:p-8 space-y-6 overflow-x-hidden">
         <SiteClerkNavbar title="Timesheet Ingestion" siteName={activeSite || 'Loading...'} />
 
-        {/* Dynamic Site Selector Banner */}
         <div className="bg-white border border-slate-200 rounded-2xl p-4 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div className="flex items-center gap-2.5">
             <div className="p-2 bg-indigo-50 text-indigo-600 rounded-xl">
@@ -301,7 +331,6 @@ function UploadContent() {
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-          {/* Left Column: File Controls & Dynamic Preview */}
           <div className="lg:col-span-5 space-y-4">
             <div className="bg-white border border-slate-200 rounded-3xl p-5 shadow-xs space-y-4">
               <div>
@@ -311,7 +340,6 @@ function UploadContent() {
                 </p>
               </div>
 
-              {/* Shift Date Picker */}
               <div className="space-y-1">
                 <label className="text-[11px] font-bold text-slate-600 flex items-center gap-1">
                   <Calendar className="w-3.5 h-3.5 text-indigo-600" /> Target Shift Date
@@ -324,7 +352,6 @@ function UploadContent() {
                 />
               </div>
 
-              {/* Dropzone Container */}
               <label className="border-2 border-dashed border-slate-300 hover:border-indigo-500 bg-slate-50/50 hover:bg-slate-50 rounded-2xl p-6 flex flex-col items-center justify-center text-center cursor-pointer transition space-y-3 block">
                 <input
                   type="file"
@@ -343,7 +370,7 @@ function UploadContent() {
                 </div>
               </label>
 
-              {selectedFile && !parsedData && (
+              {selectedFile && (
                 <button
                   onClick={handleProcessUpload}
                   disabled={uploading}
@@ -352,54 +379,80 @@ function UploadContent() {
                   {uploading ? (
                     <>
                       <Loader2 className="w-4 h-4 animate-spin" />
-                      <span>Fetching Site Roster...</span>
+                      <span>Uploading & Ingesting...</span>
                     </>
                   ) : (
                     <>
                       <Users className="w-4 h-4" />
-                      <span>Load Site Roster & Review</span>
+                      <span>Upload & Extract Data</span>
                     </>
                   )}
                 </button>
               )}
             </div>
 
-            {/* Image Viewer Container */}
+            {/* Restored Document Preview Panel */}
             <div className="bg-white border border-slate-200 rounded-3xl p-4 shadow-xs space-y-3">
               <div className="flex items-center justify-between text-xs font-bold text-slate-700">
                 <span className="flex items-center gap-1.5">
-                  <Eye className="w-4 h-4 text-indigo-600" /> Sheet Preview ({activeSite})
+                  <Eye className="w-4 h-4 text-indigo-600" /> Stored Preview ({activeSite})
                 </span>
-                <span className="text-[10px] font-mono text-slate-400 bg-slate-100 px-2 py-0.5 rounded">
-                  {shiftDate}
-                </span>
+                <div className="flex items-center gap-2">
+                  <span className="text-[10px] font-mono text-slate-400 bg-slate-100 px-2 py-0.5 rounded">
+                    {shiftDate}
+                  </span>
+                  {activeDisplayUrl && (
+                    <a
+                      href={activeDisplayUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="text-slate-500 hover:text-indigo-600"
+                      title="Open full preview"
+                    >
+                      <ExternalLink className="w-3.5 h-3.5" />
+                    </a>
+                  )}
+                </div>
               </div>
-              <div className="rounded-2xl overflow-hidden border border-slate-200 bg-slate-900 flex items-center justify-center min-h-64 max-h-96">
-                {filePreviewUrl ? (
-                  <img
-                    src={filePreviewUrl}
-                    alt={`Timesheet ${activeSite} ${shiftDate}`}
-                    className="object-contain w-full h-full"
-                  />
+
+              <div className="rounded-2xl overflow-hidden border border-slate-200 bg-slate-900 flex items-center justify-center min-h-64 max-h-96 relative">
+                {fetchingExisting ? (
+                  <div className="text-center p-6 space-y-2">
+                    <Loader2 className="w-6 h-6 animate-spin text-white mx-auto" />
+                    <p className="text-xs text-slate-300">Fetching stored document...</p>
+                  </div>
+                ) : activeDisplayUrl ? (
+                  activeDisplayUrl.endsWith('.pdf') ? (
+                    <iframe
+                      src={activeDisplayUrl}
+                      className="w-full h-80"
+                      title="Uploaded PDF Timesheet"
+                    />
+                  ) : (
+                    <img
+                      src={activeDisplayUrl}
+                      alt={`Timesheet ${activeSite} ${shiftDate}`}
+                      className="object-contain w-full h-full max-h-80"
+                    />
+                  )
                 ) : (
                   <div className="text-center p-6 space-y-2">
                     <FileText className="w-8 h-8 text-slate-600 mx-auto" />
-                    <p className="text-xs text-slate-400 font-medium">No document loaded for preview</p>
-                    <p className="text-[10px] text-slate-500">Select an image file above to render target sheet</p>
+                    <p className="text-xs text-slate-400 font-medium">No uploaded sheet found for this date</p>
+                    <p className="text-[10px] text-slate-500">Select an image or PDF file above to upload</p>
                   </div>
                 )}
               </div>
             </div>
           </div>
 
-          {/* Right Column: Verification & Hours Summary */}
           <div className="lg:col-span-7">
             <div className="bg-white border border-slate-200 rounded-3xl p-5 shadow-xs space-y-5">
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 pb-4">
                 <div>
                   <h3 className="text-sm font-bold text-slate-900">Shift Attendance Verification</h3>
                   <p className="text-xs text-slate-500">
-                    Verify pre-filled worker list against attached paper sheet and adjust exceptions.
+                    Verify worker logs against attached paper sheet and adjust exceptions.
                   </p>
                 </div>
                 <div className="flex items-center gap-2">
@@ -425,7 +478,6 @@ function UploadContent() {
                 </div>
               </div>
 
-              {/* Site Mismatch Warning Banner */}
               {siteMismatchCount > 0 && (
                 <div className="p-3 bg-amber-50 border border-amber-200 rounded-2xl flex items-center gap-2.5 text-xs text-amber-800 font-medium">
                   <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0" />
@@ -447,22 +499,6 @@ function UploadContent() {
                 </div>
               ) : parsedData ? (
                 <div className="space-y-4">
-                  {/* Hours Breakdown Summary Banner */}
-                  <div className="grid grid-cols-3 gap-3 bg-slate-50 border border-slate-200 rounded-2xl p-3 text-center">
-                    <div>
-                      <p className="text-[10px] font-bold text-slate-400 uppercase">Regular Hours</p>
-                      <p className="text-sm font-bold text-slate-800">{totalRegHours.toFixed(1)}h</p>
-                    </div>
-                    <div className="border-x border-slate-200">
-                      <p className="text-[10px] font-bold text-slate-400 uppercase">Overtime Hours</p>
-                      <p className="text-sm font-bold text-amber-600">+{totalOtHours.toFixed(1)}h</p>
-                    </div>
-                    <div>
-                      <p className="text-[10px] font-bold text-slate-400 uppercase">Total Combined</p>
-                      <p className="text-sm font-bold text-indigo-600">{totalHoursCombined.toFixed(1)}h</p>
-                    </div>
-                  </div>
-
                   <div className="overflow-x-auto border border-slate-200 rounded-2xl">
                     <table className="w-full text-left text-xs text-slate-700">
                       <thead className="bg-slate-50 border-b border-slate-200 text-slate-500 font-bold uppercase tracking-wider text-[10px]">
@@ -535,6 +571,22 @@ function UploadContent() {
                     </table>
                   </div>
 
+                  {/* Summary Bar at Bottom */}
+                  <div className="grid grid-cols-3 gap-3 bg-slate-900 text-white rounded-2xl p-4 text-center">
+                    <div>
+                      <p className="text-[10px] font-bold text-slate-400 uppercase">Regular Hours</p>
+                      <p className="text-base font-bold">{totalRegHours.toFixed(1)}h</p>
+                    </div>
+                    <div className="border-x border-slate-800">
+                      <p className="text-[10px] font-bold text-slate-400 uppercase">Overtime Hours</p>
+                      <p className="text-base font-bold text-amber-400">+{totalOtHours.toFixed(1)}h</p>
+                    </div>
+                    <div>
+                      <p className="text-[10px] font-bold text-slate-400 uppercase">Total Shift Hours</p>
+                      <p className="text-base font-bold text-indigo-400">{totalHoursCombined.toFixed(1)}h</p>
+                    </div>
+                  </div>
+
                   <div className="flex items-center justify-end gap-3 pt-2">
                     <button
                       onClick={() => setParsedData(null)}
@@ -568,7 +620,7 @@ function UploadContent() {
                   </div>
                   <p className="text-xs font-bold text-slate-700">No Roster Loaded</p>
                   <p className="text-[11px] text-slate-400 max-w-xs">
-                    Select a scanned timesheet photo on the left and click "Load Site Roster & Review" to pull pre-filled active workers for {activeSite || 'active site'}.
+                    Select a scanned timesheet photo on the left and click "Upload & Extract Data" to pull active workers for {activeSite || 'active site'}.
                   </p>
                 </div>
               )}
