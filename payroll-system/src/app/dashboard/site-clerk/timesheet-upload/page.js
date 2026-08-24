@@ -14,12 +14,14 @@ import {
   Users,
   AlertTriangle,
   MapPin,
-  Printer,
-  Clock
+  Printer
 } from 'lucide-react';
 import Link from 'next/link';
 import SiteClerkSideNav from '@/components/site-clerk/SiteClerkSideNav';
 import SiteClerkNavbar from '@/components/site-clerk/SiteClerkNavbar';
+
+// Import your PDF generation utility function from the lib folder
+import { generateTimesheetPDF } from '@/lib/generateTimesheetPDF';
 
 function UploadContent() {
   const router = useRouter();
@@ -37,11 +39,12 @@ function UploadContent() {
   const [documentUrl, setDocumentUrl] = useState(null);
   const [uploading, setUploading] = useState(false);
   const [committing, setCommitting] = useState(false);
+  const [exportingPdf, setExportingPdf] = useState(false);
   const [parsedData, setParsedData] = useState(null);
   const [submitSuccess, setSubmitSuccess] = useState(false);
   const [siteMismatchCount, setSiteMismatchCount] = useState(0);
 
-  // 1. Fetch Dynamic Sites List from API (Same pattern as Dashboard)
+  // 1. Fetch Dynamic Sites List from API
   useEffect(() => {
     async function fetchSites() {
       try {
@@ -51,7 +54,6 @@ function UploadContent() {
 
         if (res.ok && data.sites?.length > 0) {
           setSites(data.sites);
-          // If no site parameter was provided in URL, fallback to default selected site from API
           if (!initialSiteParam) {
             const defaultSite = data.selectedSite || data.sites[0].name;
             setActiveSite(defaultSite);
@@ -61,7 +63,7 @@ function UploadContent() {
         }
       } catch (err) {
         console.error('Error connecting to sites API:', err);
-      } fontFinally: {
+      } finally {
         setSitesLoading(false);
       }
     }
@@ -143,7 +145,7 @@ function UploadContent() {
       if (isNaN(outHours)) return { reg: 8.0, ot: 0.0 };
 
       const finishDecimal = outHours + (outMins || 0) / 60;
-      const standardFinishDecimal = 16.0; // Standard 8-hour cutoff (e.g. 16:00)
+      const standardFinishDecimal = 16.0;
 
       if (finishDecimal > standardFinishDecimal) {
         const ot = Number((finishDecimal - standardFinishDecimal).toFixed(2));
@@ -214,8 +216,27 @@ function UploadContent() {
     }
   };
 
-  const handleExportPDF = () => {
-    window.print();
+  // Export PDF Handler
+  const handleExportPDF = async () => {
+    if (!parsedData || parsedData.length === 0) return;
+    try {
+      setExportingPdf(true);
+      await generateTimesheetPDF({
+        siteName: activeSite,
+        shiftDate,
+        workers: parsedData,
+        totals: {
+          regularHours: totalRegHours,
+          overtimeHours: totalOtHours,
+          combinedHours: totalHoursCombined,
+        },
+      });
+    } catch (err) {
+      console.error('Error exporting PDF:', err);
+      alert('Failed to generate PDF document.');
+    } finally {
+      setExportingPdf(false);
+    }
   };
 
   // Aggregate Hours Calculations
@@ -385,10 +406,15 @@ function UploadContent() {
                   {parsedData && (
                     <button
                       onClick={handleExportPDF}
-                      className="inline-flex items-center gap-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold px-3 py-1.5 rounded-xl transition cursor-pointer"
+                      disabled={exportingPdf}
+                      className="inline-flex items-center gap-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold px-3 py-1.5 rounded-xl transition cursor-pointer disabled:opacity-50"
                     >
-                      <Printer className="w-3.5 h-3.5" />
-                      <span>Export PDF</span>
+                      {exportingPdf ? (
+                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                      ) : (
+                        <Printer className="w-3.5 h-3.5" />
+                      )}
+                      <span>{exportingPdf ? 'Generating...' : 'Export PDF'}</span>
                     </button>
                   )}
                   {parsedData && (
