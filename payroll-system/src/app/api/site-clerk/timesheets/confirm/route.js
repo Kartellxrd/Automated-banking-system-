@@ -5,7 +5,6 @@ export async function POST(request) {
   try {
     const body = await request.json();
 
-    // Standardize worker list array across potential frontend keys
     const rawWorkers = body.parsedWorkers || body.parsedData || body.workers || body.roster || [];
     const siteName = body.siteName || body.selectedSite || 'Debete Site';
     const shiftDate = body.shiftDate || body.targetDate || new Date().toISOString().split('T')[0];
@@ -17,6 +16,25 @@ export async function POST(request) {
         { status: 400 }
       );
     }
+
+    // 1. Create or Update Daily Site Roster Parent Record
+    const { data: rosterRecord, error: rosterErr } = await supabase
+      .from('daily_site_rosters')
+      .upsert(
+        {
+          site_name: siteName,
+          shift_date: shiftDate,
+          timesheet_file_url: documentUrl,
+          status: 'draft',
+          total_workers: rawWorkers.length,
+          updated_at: new Date().toISOString(),
+        },
+        { onConflict: 'site_name, shift_date' }
+      )
+      .select('id')
+      .single();
+
+    const dailyRosterId = rosterRecord?.id || null;
 
     const processedLogs = [];
 
@@ -36,7 +54,7 @@ export async function POST(request) {
             first_name: firstName,
             last_name: lastName,
             national_id: nationalId,
-            employee_code: worker.employee_code || `WALKON-${nationalId || Date.now()}`,
+            employee_code: worker.employee_code || `WALKON-${nationalId || Date.now().toString().slice(-4)}`,
             assigned_site: siteName,
             status: 'Active',
           })
@@ -48,45 +66,47 @@ export async function POST(request) {
         }
       }
 
-      // Build shift log entry
+      // Calculate Reg & Overtime Hours (Standard 8h Shift Split)
+      const regHours = Number(worker.regular_hours ?? worker.regHours ?? 8.0);
+      const otHours = Number(worker.overtime_hours ?? worker.otHours ?? 0.0);
+      const totalHours = regHours + otHours;
+
       processedLogs.push({
+        daily_roster_id: dailyRosterId,
         employee_id: employeeId,
         site_name: siteName,
         shift_date: shiftDate,
         time_in: worker.timeInStr || worker.timeIn || '07:00 AM',
-        time_out: worker.timeOutStr || worker.timeOut || '05:00 PM',
-        regular_hours: Number(worker.regular_hours ?? worker.regHours ?? 8),
-        overtime_hours: Number(worker.overtime_hours ?? worker.otHours ?? 0),
-        total_hours:
-          Number(worker.regular_hours ?? worker.regHours ?? 8) +
-          Number(worker.overtime_hours ?? worker.otHours ?? 0),
+        time_out: worker.timeOutStr || worker.timeOut || '04:00 PM',
+        regular_hours: regHours,
+        overtime_hours: otHours,
+        total_hours: totalHours,
         is_late: Boolean(worker.warnings?.is_late || worker.isLate || false),
-        status: 'Locked',
+        status: 'Pending Entry', // Allows clerk to edit on Roster Dashboard before HR submission
       });
     }
 
-    // Upsert into shift logs
+    // Clear existing logs for this site and date to prevent duplicate key constraint crashes
+    await supabase
+      .from('shift_logs')
+      .delete()
+      .eq('site_name', siteName)
+      .eq('shift_date', shiftDate);
+
+    // Insert batch shift logs
     const { error: logError } = await supabase
       .from('shift_logs')
-      .upsert(processedLogs, { onConflict: 'employee_id, shift_date' });
+      .insert(processedLogs);
 
     if (logError) {
       console.error('Shift Log DB Error:', logError.message);
       return NextResponse.json({ error: logError.message }, { status: 500 });
     }
 
-    // Insert approved timesheet document log
-    await supabase.from('timesheets').insert({
-      site_name: siteName,
-      shift_date: shiftDate,
-      total_workers: rawWorkers.length,
-      document_url: documentUrl,
-      status: 'approved',
-    });
-
     return NextResponse.json({
       success: true,
-      message: `Successfully locked ${rawWorkers.length} shift logs for ${siteName}.`,
+      redirectUrl: `/site-clerk/roster?site=${encodeURIComponent(siteName)}&date=${shiftDate}`,
+      message: `Successfully recorded ${rawWorkers.length} shift logs for ${siteName}.`,
     });
   } catch (err) {
     console.error('Confirmation Handler Error:', err);

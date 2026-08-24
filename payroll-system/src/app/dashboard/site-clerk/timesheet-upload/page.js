@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, Suspense } from 'react';
-import { useSearchParams } from 'next/navigation';
+import { useSearchParams, useRouter } from 'next/navigation';
 import { 
   UploadCloud, 
   FileText, 
@@ -11,17 +11,19 @@ import {
   ArrowLeft,
   Send,
   Calendar,
-  Users
+  Users,
+  AlertTriangle
 } from 'lucide-react';
 import Link from 'next/link';
 import SiteClerkSideNav from '@/components/site-clerk/SiteClerkSideNav';
 import SiteClerkNavbar from '@/components/site-clerk/SiteClerkNavbar';
 
 function UploadContent() {
+  const router = useRouter();
   const searchParams = useSearchParams();
   const siteParam = searchParams.get('site') || 'Debete Site';
 
-  const [shiftDate, setShiftDate] = useState('2026-08-21');
+  const [shiftDate, setShiftDate] = useState('2026-08-24');
   const [selectedFile, setSelectedFile] = useState(null);
   const [filePreviewUrl, setFilePreviewUrl] = useState(null);
   const [documentUrl, setDocumentUrl] = useState(null);
@@ -29,6 +31,7 @@ function UploadContent() {
   const [committing, setCommitting] = useState(false);
   const [parsedData, setParsedData] = useState(null);
   const [submitSuccess, setSubmitSuccess] = useState(false);
+  const [siteMismatchCount, setSiteMismatchCount] = useState(0);
 
   useEffect(() => {
     return () => {
@@ -42,6 +45,7 @@ function UploadContent() {
       setSelectedFile(file);
       setParsedData(null);
       setSubmitSuccess(false);
+      setSiteMismatchCount(0);
 
       if (file.type.startsWith('image/')) {
         setFilePreviewUrl(URL.createObjectURL(file));
@@ -69,15 +73,44 @@ function UploadContent() {
       const data = await res.json();
 
       if (res.ok) {
-        setParsedData(data.parsedWorkers || []);
+        const workers = data.parsedWorkers || [];
+        setParsedData(workers);
         setDocumentUrl(data.documentUrl || null);
+
+        // Check for cross-site allocation warnings
+        const mismatches = workers.filter(
+          (w) => w.assigned_site && w.assigned_site.toLowerCase() !== siteParam.toLowerCase()
+        ).length;
+        setSiteMismatchCount(mismatches);
       } else {
         console.error('Failed to load roster:', data.error);
+        alert(data.error || 'Failed to upload timesheet.');
       }
     } catch (err) {
       console.error('Error attaching file & fetching roster:', err);
     } finally {
       setUploading(false);
+    }
+  };
+
+  // Helper to calculate Reg & Overtime hours automatically when clock-out changes
+  const calculateHoursFromTimes = (timeInStr, timeOutStr) => {
+    try {
+      if (!timeOutStr || timeOutStr === '--:--') return { reg: 0, ot: 0 };
+      const [outHours, outMins] = timeOutStr.split(':').map(Number);
+      if (isNaN(outHours)) return { reg: 8.0, ot: 0.0 };
+
+      // Standard finish is 16:00 (4:00 PM)
+      const finishDecimal = outHours + (outMins || 0) / 60;
+      const standardFinishDecimal = 16.0;
+
+      if (finishDecimal > standardFinishDecimal) {
+        const ot = Number((finishDecimal - standardFinishDecimal).toFixed(2));
+        return { reg: 8.0, ot };
+      }
+      return { reg: Number(Math.min(finishDecimal - 7.0, 8.0).toFixed(2)), ot: 0.0 };
+    } catch {
+      return { reg: 8.0, ot: 0.0 };
     }
   };
 
@@ -88,11 +121,19 @@ function UploadContent() {
 
         const updated = { ...worker, [field]: value };
 
+        // Handle Status Exceptions
         if (field === 'status' && ['sick_leave', 'awol', 'on_leave'].includes(value)) {
           updated.timeInStr = '--:--';
           updated.timeOutStr = '--:--';
           updated.regular_hours = 0;
           updated.overtime_hours = 0;
+        }
+
+        // Handle Automatic OT Calculation on Time Out Change
+        if (field === 'timeOutStr') {
+          const { reg, ot } = calculateHoursFromTimes(updated.timeInStr, value);
+          updated.regular_hours = reg;
+          updated.overtime_hours = ot;
         }
 
         return updated;
@@ -110,18 +151,23 @@ function UploadContent() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           parsedWorkers: parsedData,
-          records: parsedData,
           siteName: siteParam,
           shiftDate: shiftDate,
           documentUrl: documentUrl,
         }),
       });
 
+      const data = await res.json();
+
       if (res.ok) {
         setSubmitSuccess(true);
+        // Phase 2 Auto-redirect to Roster Dashboard
+        if (data.redirectUrl) {
+          router.push(data.redirectUrl);
+        }
       } else {
-        const err = await res.json();
-        console.error('Failed to commit shift logs:', err.error);
+        console.error('Failed to commit shift logs:', data.error);
+        alert(`Error locking shift logs: ${data.error}`);
       }
     } catch (err) {
       console.error('Submission error:', err);
@@ -247,6 +293,16 @@ function UploadContent() {
                 )}
               </div>
 
+              {/* Site Mismatch Warning Banner */}
+              {siteMismatchCount > 0 && (
+                <div className="p-3 bg-amber-50 border border-amber-200 rounded-2xl flex items-center gap-2.5 text-xs text-amber-800 font-medium">
+                  <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0" />
+                  <span>
+                    <strong>{siteMismatchCount} worker(s)</strong> on this sheet are mapped to a different site than <strong>{siteParam}</strong>. Confirming will record them under this active station.
+                  </span>
+                </div>
+              )}
+
               {submitSuccess ? (
                 <div className="p-6 bg-emerald-50 border border-emerald-200 rounded-2xl text-center space-y-3">
                   <div className="p-3 bg-emerald-100 text-emerald-700 rounded-full w-12 h-12 flex items-center justify-center mx-auto">
@@ -254,16 +310,8 @@ function UploadContent() {
                   </div>
                   <h4 className="text-base font-bold text-emerald-900">Timesheet Logs Locked</h4>
                   <p className="text-xs text-emerald-700 max-w-md mx-auto">
-                    Shift entries for {siteParam} ({shiftDate}) have been saved to shift_logs.
+                    Redirecting to Roster Dashboard for final adjustments...
                   </p>
-                  <div className="pt-2">
-                    <Link
-                      href="/dashboard/site-clerk"
-                      className="inline-flex items-center gap-2 bg-emerald-700 hover:bg-emerald-800 text-white text-xs font-semibold px-4 py-2.5 rounded-xl transition"
-                    >
-                      Return to Dashboard
-                    </Link>
-                  </div>
                 </div>
               ) : parsedData ? (
                 <div className="space-y-4">
@@ -275,6 +323,7 @@ function UploadContent() {
                           <th className="p-3">Time In</th>
                           <th className="p-3">Time Out</th>
                           <th className="p-3">Reg. Hours</th>
+                          <th className="p-3">OT Hours</th>
                           <th className="p-3">Status / Exception</th>
                         </tr>
                       </thead>
@@ -313,6 +362,9 @@ function UploadContent() {
                                   onChange={(e) => handleWorkerChange(worker.id, 'regular_hours', Number(e.target.value))}
                                   className="w-12 font-bold text-xs bg-slate-50 border border-slate-200 rounded p-1 text-center disabled:opacity-40"
                                 />
+                              </td>
+                              <td className="p-3 font-bold text-amber-600">
+                                {worker.overtime_hours > 0 ? `+${worker.overtime_hours}h` : '0h'}
                               </td>
                               <td className="p-3">
                                 <select
