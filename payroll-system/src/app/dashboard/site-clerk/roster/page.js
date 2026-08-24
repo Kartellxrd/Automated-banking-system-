@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback, Suspense } from 'react';
-import { useSearchParams } from 'next/navigation';
+import { useSearchParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { 
   Building2, 
@@ -16,42 +16,79 @@ import {
   ShieldCheck,
   Send,
   Loader2,
-  Calendar
+  Calendar,
+  MapPin
 } from 'lucide-react';
 import SiteClerkSideNav from '@/components/site-clerk/SiteClerkSideNav';
 import SiteClerkNavbar from '@/components/site-clerk/SiteClerkNavbar';
 
 function RosterLockContent() {
+  const router = useRouter();
   const searchParams = useSearchParams();
-  const initialSite = searchParams.get('site') || 'Site A';
+  const initialSiteParam = searchParams.get('site') || '';
 
-  const [sites, setSites] = useState(['Site A', 'Site B', 'Site C', 'Site D']);
-  const [selectedSite, setSelectedSite] = useState(initialSite);
-  const [shiftDate, setShiftDate] = useState(new Date().toISOString().split('T')[0]);
-  
+  // Dynamic Site State (Fetched from API)
+  const [sites, setSites] = useState([]);
+  const [sitesLoading, setSitesLoading] = useState(true);
+  const [selectedSite, setSelectedSite] = useState(initialSiteParam);
+  const [shiftDate, setShiftDate] = useState('2026-08-24');
+
   const [roster, setRoster] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isLocked, setIsLocked] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
-  
+
   // Modal state for editing shift variances
   const [editingWorker, setEditingWorker] = useState(null);
   const [varianceHours, setVarianceHours] = useState('');
   const [varianceReason, setVarianceReason] = useState('');
 
-  // 1. Fetch sites, employees, and timecards via API route
+  // 1. Fetch Dynamic Sites List from API
+  useEffect(() => {
+    async function fetchSites() {
+      try {
+        setSitesLoading(true);
+        const res = await fetch('/api/site-clerk/dashboard');
+        const data = await res.json();
+
+        if (res.ok && data.sites?.length > 0) {
+          setSites(data.sites);
+          if (!initialSiteParam) {
+            const defaultSite = data.selectedSite || data.sites[0].name;
+            setSelectedSite(defaultSite);
+          }
+        } else {
+          console.error('Failed to load sites:', data.error);
+        }
+      } catch (err) {
+        console.error('Error fetching sites:', err);
+      } finally {
+        setSitesLoading(false);
+      }
+    }
+
+    fetchSites();
+  }, [initialSiteParam]);
+
+  // Sync site change with URL parameters
+  const handleSiteChange = (newSite) => {
+    setSelectedSite(newSite);
+    router.replace(`?site=${encodeURIComponent(newSite)}`);
+  };
+
+  // 2. Fetch Employees and Timecards via API route
   const loadSiteRoster = useCallback(async () => {
+    if (!selectedSite) return;
+
     setIsLoading(true);
     try {
-      const res = await fetch(`/api/site-clerk/roster?site=${encodeURIComponent(selectedSite)}&date=${shiftDate}`);
+      const res = await fetch(
+        `/api/site-clerk/roster?site=${encodeURIComponent(selectedSite)}&date=${shiftDate}`
+      );
       const data = await res.json();
 
       if (!res.ok) throw new Error(data.error || 'Failed to fetch roster');
-
-      if (data.sites && data.sites.length > 0) {
-        setSites(data.sites);
-      }
 
       setIsLocked(data.isLocked || false);
 
@@ -88,7 +125,7 @@ function RosterLockContent() {
     loadSiteRoster();
   }, [loadSiteRoster]);
 
-  // 2. Save variance adjustments via PATCH API
+  // 3. Save variance adjustments via PATCH API
   const handleSaveVariance = async (e) => {
     e.preventDefault();
     if (!editingWorker || !varianceReason.trim()) return;
@@ -139,7 +176,7 @@ function RosterLockContent() {
     }
   };
 
-  // 3. Lock Roster & Submit to HR via POST API
+  // 4. Lock Roster & Submit to HR via POST API
   const handleLockAndSubmit = async () => {
     if (
       !confirm(
@@ -183,9 +220,9 @@ function RosterLockContent() {
       <SiteClerkSideNav />
 
       <main className="flex-1 p-4 sm:p-6 lg:p-8 space-y-6 overflow-x-hidden">
-        <SiteClerkNavbar title="Shift Log & Roster Lock" siteName={selectedSite} />
+        <SiteClerkNavbar title="Shift Log & Roster Lock" siteName={selectedSite || 'Loading...'} />
 
-        {/* Back Link, Date Selector & Site Switcher */}
+        {/* Back Link, Date Selector & Dynamic Site Switcher */}
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white p-4 sm:p-5 rounded-2xl border border-slate-200 shadow-xs">
           <Link
             href="/dashboard/site-clerk"
@@ -206,18 +243,25 @@ function RosterLockContent() {
             </div>
 
             <div className="flex items-center gap-2">
-              <span className="text-xs font-semibold text-slate-500">Target Site:</span>
-              <select
-                value={selectedSite}
-                onChange={(e) => setSelectedSite(e.target.value)}
-                className="bg-slate-900 text-white text-xs font-bold rounded-xl px-3 py-2 outline-none cursor-pointer focus:ring-2 focus:ring-indigo-500"
-              >
-                {sites.map((site) => (
-                  <option key={site} value={site}>
-                    {site}
-                  </option>
-                ))}
-              </select>
+              <span className="text-xs font-semibold text-slate-500">Target Station:</span>
+              {sitesLoading ? (
+                <div className="flex items-center gap-2 text-xs text-slate-500 bg-slate-50 border border-slate-200 rounded-xl px-3 py-1.5">
+                  <Loader2 className="w-3.5 h-3.5 animate-spin text-indigo-600" />
+                  <span>Loading...</span>
+                </div>
+              ) : (
+                <select
+                  value={selectedSite}
+                  onChange={(e) => handleSiteChange(e.target.value)}
+                  className="bg-slate-900 text-white text-xs font-bold rounded-xl px-3 py-2 outline-none cursor-pointer focus:ring-2 focus:ring-indigo-500"
+                >
+                  {sites.map((site) => (
+                    <option key={site.id || site.name} value={site.name}>
+                      {site.name}
+                    </option>
+                  ))}
+                </select>
+              )}
             </div>
           </div>
         </div>

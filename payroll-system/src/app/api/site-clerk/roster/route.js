@@ -8,14 +8,14 @@ export async function GET(request) {
     const site = searchParams.get('site') || 'Site A';
     const date = searchParams.get('date') || new Date().toISOString().split('T')[0];
 
-    // 1. Fetch available active sites using 'site_name'
+    // 1. Fetch available active sites
     const { data: sitesData, error: sitesErr } = await supabase
       .from('sites')
       .select('id, site_name');
 
     if (sitesErr) throw sitesErr;
 
-    // 2. Fetch employees assigned to this site using 'job_role'
+    // 2. Fetch employees assigned to this site
     const { data: employees, error: empErr } = await supabase
       .from('employees')
       .select('id, first_name, last_name, employee_code, job_role, assigned_site')
@@ -23,34 +23,34 @@ export async function GET(request) {
 
     if (empErr) throw empErr;
 
-    // 3. Fetch shift log entries for site location from 'shift_logs'
+    // 3. Fetch shift log entries filtered by site location AND shift date
     const { data: shiftLogs, error: logErr } = await supabase
       .from('shift_logs')
       .select('*')
-      .eq('site_location', site);
+      .eq('site_location', site)
+      .gte('clock_in', `${date}T00:00:00`)
+      .lte('clock_in', `${date}T23:59:59`);
 
-    if (logErr) throw logErr;
+    if (logErr && logErr.code !== 'PGRST116') {
+      console.warn('Warning querying shift_logs by date range:', logErr.message);
+    }
 
-    // 4. Check if shift is locked via shift_locks table or status in shift_logs
-    const { data: shiftLock } = await supabase
-      .from('shift_locks')
-      .select('is_locked, locked_at')
-      .eq('site_name', site)
-      .eq('shift_date', date)
-      .maybeSingle();
+    // 4. Determine lock status directly from shift_logs entries
+    const isLocked = (shiftLogs || []).some(
+      (log) => log.status === 'locked' || log.status === 'Submitted to HR'
+    );
 
     return NextResponse.json({
       success: true,
       sites: (sitesData || []).map((s) => s.site_name),
-      isLocked: shiftLock?.is_locked || false,
-      lockedAt: shiftLock?.locked_at || null,
+      isLocked,
       employees: (employees || []).map((e) => ({
         ...e,
-        job_title: e.job_role, // map back for frontend UI compatibility
+        job_title: e.job_role || 'General Worker',
       })),
       attendance: (shiftLogs || []).map((l) => ({
         ...l,
-        audit_note: l.supervisor_notes, // map back for frontend UI compatibility
+        audit_note: l.supervisor_notes || '',
       })),
     });
   } catch (err) {
@@ -75,26 +75,21 @@ export async function POST(request) {
       );
     }
 
+    // Mark all logs for this site and date as locked
     const { data, error } = await supabase
-      .from('shift_locks')
-      .upsert(
-        {
-          site_name: site,
-          shift_date: date,
-          is_locked: true,
-          locked_at: new Date().toISOString(),
-        },
-        { onConflict: 'site_name,shift_date' }
-      )
-      .select()
-      .single();
+      .from('shift_logs')
+      .update({ status: 'Submitted to HR' })
+      .eq('site_location', site)
+      .gte('clock_in', `${date}T00:00:00`)
+      .lte('clock_in', `${date}T23:59:59`)
+      .select();
 
     if (error) throw error;
 
     return NextResponse.json({
       success: true,
       message: `Shift roster for ${site} on ${date} locked successfully.`,
-      lockData: data,
+      logs: data,
     });
   } catch (err) {
     console.error('Error locking shift roster:', err);
@@ -109,11 +104,21 @@ export async function POST(request) {
 export async function PATCH(request) {
   try {
     const body = await request.json();
-    const { attendanceId, employeeId, site, date, clockIn, clockOut, regHours, otHours, auditNote } = body;
+    const {
+      attendanceId,
+      employeeId,
+      site,
+      date,
+      clockIn,
+      clockOut,
+      regHours,
+      otHours,
+      auditNote,
+    } = body;
 
-    if (!employeeId || !site || !date) {
+    if (!employeeId || !site) {
       return NextResponse.json(
-        { error: 'Employee ID, site, and date are required.' },
+        { error: 'Employee ID and site location are required.' },
         { status: 400 }
       );
     }
@@ -121,13 +126,14 @@ export async function PATCH(request) {
     let resultData = null;
 
     if (attendanceId) {
-      // Update existing record in shift_logs
+      // 1. Update existing timecard record in shift_logs by primary ID
       const { data, error } = await supabase
         .from('shift_logs')
         .update({
-          overtime_hours: otHours,
+          overtime_hours: parseFloat(otHours) || 0,
+          regular_hours: parseFloat(regHours) || 8,
           status: 'Adjusted & Verified',
-          supervisor_notes: auditNote,
+          supervisor_notes: auditNote || '',
         })
         .eq('id', attendanceId)
         .select()
@@ -136,31 +142,61 @@ export async function PATCH(request) {
       if (error) throw error;
       resultData = data;
     } else {
-      // Insert new timecard record in shift_logs
-      const { data, error } = await supabase
-        .from('shift_logs')
-        .insert({
-          employee_id: employeeId,
-          site_location: site,
-          clock_in: clockIn || new Date().toISOString(),
-          clock_out: clockOut || new Date().toISOString(),
-          regular_hours: regHours ?? 8,
-          overtime_hours: otHours ?? 0,
-          status: 'Adjusted & Verified',
-          supervisor_notes: auditNote,
-        })
-        .select()
-        .single();
+      // 2. Check if a record already exists for this worker on this date before inserting
+      const shiftDateStr = date || new Date().toISOString().split('T')[0];
 
-      if (error) throw error;
-      resultData = data;
+      const { data: existingLog } = await supabase
+        .from('shift_logs')
+        .select('id')
+        .eq('employee_id', employeeId)
+        .eq('site_location', site)
+        .gte('clock_in', `${shiftDateStr}T00:00:00`)
+        .lte('clock_in', `${shiftDateStr}T23:59:59`)
+        .maybeSingle();
+
+      if (existingLog?.id) {
+        // Update the existing record found
+        const { data, error } = await supabase
+          .from('shift_logs')
+          .update({
+            overtime_hours: parseFloat(otHours) || 0,
+            regular_hours: parseFloat(regHours) || 8,
+            status: 'Adjusted & Verified',
+            supervisor_notes: auditNote || '',
+          })
+          .eq('id', existingLog.id)
+          .select()
+          .single();
+
+        if (error) throw error;
+        resultData = data;
+      } else {
+        // Insert brand new shift log entry
+        const { data, error } = await supabase
+          .from('shift_logs')
+          .insert({
+            employee_id: employeeId,
+            site_location: site,
+            clock_in: clockIn ? new Date(`${shiftDateStr} ${clockIn}`).toISOString() : new Date().toISOString(),
+            clock_out: clockOut ? new Date(`${shiftDateStr} ${clockOut}`).toISOString() : new Date().toISOString(),
+            regular_hours: parseFloat(regHours) || 8,
+            overtime_hours: parseFloat(otHours) || 0,
+            status: 'Adjusted & Verified',
+            supervisor_notes: auditNote || '',
+          })
+          .select()
+          .single();
+
+        if (error) throw error;
+        resultData = data;
+      }
     }
 
     return NextResponse.json({
       success: true,
       attendance: {
         ...resultData,
-        audit_note: resultData?.supervisor_notes,
+        audit_note: resultData?.supervisor_notes || '',
       },
     });
   } catch (err) {
