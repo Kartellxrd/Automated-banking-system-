@@ -36,7 +36,7 @@ export async function POST(request) {
     const body = await request.json();
 
     const rawWorkers = body.parsedWorkers || body.parsedData || body.workers || body.roster || [];
-    const siteName = body.siteName || body.selectedSite || 'Debete Site';
+    const siteName = body.siteName || body.selectedSite || 'Site A';
     const shiftDate = body.shiftDate || body.targetDate || new Date().toISOString().split('T')[0];
     const documentUrl = body.documentUrl || null;
 
@@ -47,7 +47,10 @@ export async function POST(request) {
       );
     }
 
-    // 1. Create or Update Daily Site Roster Parent Record
+    const totalRegHours = rawWorkers.reduce((acc, w) => acc + Number(w.regular_hours ?? w.regHours ?? 8.0), 0);
+    const totalOtHours = rawWorkers.reduce((acc, w) => acc + Number(w.overtime_hours ?? w.otHours ?? 0.0), 0);
+
+    // 1. Upsert Daily Site Roster Parent Record
     let dailyRosterId = null;
     try {
       const { data: rosterRecord, error: rosterErr } = await supabase
@@ -57,8 +60,10 @@ export async function POST(request) {
             site_name: siteName,
             shift_date: shiftDate,
             timesheet_file_url: documentUrl,
-            status: 'draft',
+            status: 'pending_hr',
             total_workers: rawWorkers.length,
+            total_regular_hours: totalRegHours,
+            total_overtime_hours: totalOtHours,
             updated_at: new Date().toISOString(),
           },
           { onConflict: 'site_name, shift_date' }
@@ -75,13 +80,14 @@ export async function POST(request) {
 
     const processedLogs = [];
 
-    // 2. Map workers and parse time strings to ISO timestamps
+    // 2. Map workers and register walk-ons
     for (const worker of rawWorkers) {
       let employeeId = worker.employee_id || worker.employeeId || worker.id || null;
       const workerName = worker.worker_name || worker.workerName || worker.name || 'Unknown Worker';
       const nationalId = worker.national_id || worker.idNumber || null;
 
-      if (worker.is_unregistered || !employeeId) {
+      const isTempId = typeof employeeId === 'number' && employeeId < 1000;
+      if (worker.is_unregistered || !employeeId || isTempId) {
         const [firstName, ...lastNameParts] = workerName.trim().split(' ');
         const lastName = lastNameParts.join(' ') || 'Worker';
 
@@ -111,13 +117,14 @@ export async function POST(request) {
 
       const logItem = {
         employee_id: employeeId,
+        worker_name: workerName,
         site_location: siteName,
         shift_date: shiftDate,
         clock_in: parseToISO(rawIn, shiftDate),
         clock_out: parseToISO(rawOut, shiftDate),
         regular_hours: regHours,
         overtime_hours: otHours,
-        status: 'pending', // Validated enum value matching shift_status type
+        status: 'pending_hr',
       };
 
       if (dailyRosterId) {
@@ -141,32 +148,44 @@ export async function POST(request) {
         .eq('shift_date', shiftDate);
     }
 
-    // 4. Batch Insert Into shift_logs
-    const { error: logError } = await supabase
+    // 4. Batch Insert Into shift_logs with automatic column fallback handling
+    let { error: logError } = await supabase
       .from('shift_logs')
       .insert(processedLogs);
 
+    // Retry without 'worker_name' if column does not exist in DB schema
+    if (logError && logError.message?.includes('worker_name')) {
+      const cleanedLogs = processedLogs.map(({ worker_name, ...rest }) => rest);
+      const { error: retryErr } = await supabase
+        .from('shift_logs')
+        .insert(cleanedLogs);
+      
+      logError = retryErr;
+    }
+
+    // Retry without 'daily_roster_id' or 'site_location' if column mismatch occurs
+    if (logError && (logError.message?.includes('daily_roster_id') || logError.message?.includes('site_location'))) {
+      const fallbackLogs = processedLogs.map(({ worker_name, daily_roster_id, site_location, ...rest }) => ({
+        ...rest,
+        site_name: siteName,
+      }));
+
+      const { error: finalErr } = await supabase
+        .from('shift_logs')
+        .insert(fallbackLogs);
+
+      logError = finalErr;
+    }
+
     if (logError) {
       console.error('Shift Log DB Insert Error:', logError.message);
-
-      if (logError.message?.includes('daily_roster_id')) {
-        const strippedLogs = processedLogs.map(({ daily_roster_id, ...rest }) => rest);
-        const { error: fallbackErr } = await supabase
-          .from('shift_logs')
-          .insert(strippedLogs);
-
-        if (fallbackErr) {
-          return NextResponse.json({ error: fallbackErr.message }, { status: 500 });
-        }
-      } else {
-        return NextResponse.json({ error: logError.message }, { status: 500 });
-      }
+      return NextResponse.json({ error: logError.message }, { status: 500 });
     }
 
     return NextResponse.json({
       success: true,
-      redirectUrl: `/dashboard/site-clerk/roster?site=${encodeURIComponent(siteName)}&date=${shiftDate}`,
-      message: `Successfully recorded ${rawWorkers.length} shift logs for ${siteName}.`,
+      redirectUrl: `/dashboard/hr`,
+      message: `Successfully submitted ${rawWorkers.length} worker logs for ${siteName} to HR.`,
     });
   } catch (err) {
     console.error('Confirmation Handler Error:', err);

@@ -15,7 +15,10 @@ import {
   Clock,
   Loader2,
   Users,
-  X
+  X,
+  FileText,
+  ExternalLink,
+  Building2
 } from 'lucide-react';
 
 export default function HRDashboardPage() {
@@ -40,7 +43,7 @@ export default function HRDashboardPage() {
       }
     } catch (err) {
       console.error('Failed loading HR Dashboard data:', err);
-    } finally {
+    }  finally {
       setLoading(false);
     }
   };
@@ -68,7 +71,6 @@ export default function HRDashboardPage() {
       if (json.success) {
         triggerNotification('Shift log verified and approved successfully!');
         
-        // Optimistically update queue state and metrics
         setData((prev) => prev ? {
           ...prev,
           pendingQueue: prev.pendingQueue.filter((q) => q.id !== shiftId),
@@ -101,7 +103,7 @@ export default function HRDashboardPage() {
     },
     { 
       name: 'Pending Shift Reviews', 
-      value: data?.stats?.pendingReviews ?? 0, 
+      value: (data?.stats?.pendingReviews ?? 0) + (data?.pendingRosters?.length ?? 0), 
       change: 'Requires inline review', 
       color: 'bg-amber-500', 
       icon: FileSearch, 
@@ -196,6 +198,92 @@ export default function HRDashboardPage() {
                 </Link>
               );
             })}
+          </div>
+
+          {/* SITE CLERK INCOMING TIMESHEETS SECTION */}
+          <div className="bg-white p-6 rounded-3xl border border-slate-200/80 shadow-xs space-y-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <h2 className="text-lg font-black text-slate-900 flex items-center gap-2">
+                  <FileText className="w-5 h-5 text-indigo-600" />
+                  <span>Incoming Site Clerk Submissions</span>
+                </h2>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  Field rosters submitted by Site Clerks awaiting HR verification.
+                </p>
+              </div>
+              <span className="px-3 py-1 rounded-full text-xs font-extrabold bg-indigo-50 text-indigo-700 border border-indigo-100">
+                {data?.pendingRosters?.length || 0} Batches Pending
+              </span>
+            </div>
+
+            {loading ? (
+              <div className="p-8 text-center text-xs text-slate-400 flex items-center justify-center gap-2">
+                <Loader2 className="w-4 h-4 animate-spin" /> Fetching submitted site rosters...
+              </div>
+            ) : !data?.pendingRosters || data.pendingRosters.length === 0 ? (
+              <div className="p-8 text-center bg-slate-50 rounded-2xl border border-dashed border-slate-200 text-xs text-slate-500 font-medium">
+                No site clerk submissions pending review.
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-2">
+                {data.pendingRosters.map((roster) => (
+                  <div key={roster.id} className="p-4 rounded-2xl border border-slate-200 bg-slate-50/50 hover:bg-white hover:border-indigo-200 transition space-y-3">
+                    <div className="flex items-start justify-between">
+                      <div className="flex items-center gap-2">
+                        <div className="p-2 bg-indigo-100 text-indigo-700 rounded-xl">
+                          <Building2 className="w-4 h-4" />
+                        </div>
+                        <div>
+                          <h4 className="font-bold text-slate-900 text-sm">{roster.site_name}</h4>
+                          <span className="text-[11px] text-slate-500 font-medium">{roster.shift_date}</span>
+                        </div>
+                      </div>
+                      <span className="px-2.5 py-0.5 rounded-full text-[10px] font-extrabold bg-amber-50 text-amber-700 border border-amber-200 uppercase">
+                        {roster.status}
+                      </span>
+                    </div>
+
+                    <div className="grid grid-cols-3 gap-2 text-center py-2 bg-white rounded-xl border border-slate-100 text-xs">
+                      <div>
+                        <span className="block text-[10px] text-slate-400 font-medium">Workers</span>
+                        <span className="font-extrabold text-slate-800">{roster.total_workers}</span>
+                      </div>
+                      <div>
+                        <span className="block text-[10px] text-slate-400 font-medium">Reg Hours</span>
+                        <span className="font-extrabold text-slate-800">{roster.total_regular_hours}h</span>
+                      </div>
+                      <div>
+                        <span className="block text-[10px] text-slate-400 font-medium">OT Hours</span>
+                        <span className="font-extrabold text-amber-600">{roster.total_overtime_hours}h</span>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center justify-between pt-1">
+                      {roster.timesheet_file_url ? (
+                        <a
+                          href={roster.timesheet_file_url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-xs text-indigo-600 font-bold hover:underline inline-flex items-center gap-1"
+                        >
+                          View Attachment <ExternalLink className="w-3 h-3" />
+                        </a>
+                      ) : (
+                        <span className="text-xs text-slate-400 italic">No document attached</span>
+                      )}
+
+                      <Link
+                        href={`/dashboard/hr/absences?site=${encodeURIComponent(roster.site_name)}&date=${roster.shift_date}`}
+                        className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold rounded-xl transition inline-flex items-center gap-1.5 shadow-xs"
+                      >
+                        Review Roster <ArrowRight className="w-3.5 h-3.5" />
+                      </Link>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
 
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">

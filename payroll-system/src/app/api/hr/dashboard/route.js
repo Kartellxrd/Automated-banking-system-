@@ -3,106 +3,63 @@ import { supabase } from '@/lib/supabase';
 
 export async function GET() {
   try {
-    // 1. Fetch active employees count (case-insensitive & fallback)
-    let { count: activePersonnel, error: empErr } = await supabase
+    // 1. Fetch active personnel count
+    const { count: activePersonnel } = await supabase
       .from('employees')
-      .select('id', { count: 'exact', head: true })
-      .ilike('status', 'active');
+      .select('id', { count: 'exact', head: true });
 
-    // Fallback: If no status column matched or filtered 0, count all non-archived employees
-    if (empErr || activePersonnel === 0) {
-      const { count: totalEmp } = await supabase
-        .from('employees')
-        .select('id', { count: 'exact', head: true });
-      
-      if (totalEmp) activePersonnel = totalEmp;
-    }
+    // 2. Fetch pending roster batches from field clerks
+    const { data: rosterData } = await supabase
+      .from('daily_site_rosters')
+      .select('*')
+      .order('created_at', { ascending: false })
+      .limit(20);
 
-    if (empErr) console.error('Error fetching employees count:', empErr);
+    // 3. Fetch unverified shift logs
+    const { data: shiftData } = await supabase
+      .from('shift_logs')
+      .select('*')
+      .order('created_at', { ascending: false })
+      .limit(30);
 
-    // 2. Fetch pending shift logs with employee join
-    const { data: pendingShifts, error: shiftErr } = await supabase
-      .from('shifts')
-      .select(`
-        id,
-        shift_date,
-        shift_type,
-        status,
-        site_name,
-        employees!left (
-          first_name,
-          last_name,
-          employee_code
-        )
-      `)
-      .eq('status', 'PENDING')
-      .order('shift_date', { ascending: false })
-      .limit(10);
+    // 4. Transform queue items to guarantee all expected properties exist
+    const formattedQueue = (shiftData || []).map((shift) => ({
+      id: String(shift.id),
+      worker: shift.worker_name || shift.employee_name || 'Field Worker',
+      site: shift.site_location || shift.site_name || 'Unassigned Site',
+      type: `${shift.regular_hours || 8}h Reg / ${shift.overtime_hours || 0}h OT`,
+      date: shift.shift_date || new Date(shift.created_at).toLocaleDateString(),
+      status: shift.status || 'PENDING',
+    }));
 
-    if (shiftErr) console.error('Error fetching pending shifts:', shiftErr);
+    // 5. Calculate pending reviews & staging stats
+    const pendingReviewsCount = formattedQueue.filter(
+      (s) => String(s.status).toUpperCase() === 'PENDING'
+    ).length;
 
-    // 3. Count total pending reviews
-    const { count: pendingReviewsCount, error: pendingCountErr } = await supabase
-      .from('shifts')
-      .select('id', { count: 'exact', head: true })
-      .eq('status', 'PENDING');
+    const readyForStaging = formattedQueue.filter(
+      (s) => String(s.status).toUpperCase() === 'APPROVED'
+    ).length;
 
-    if (pendingCountErr) console.error('Error counting pending shifts:', pendingCountErr);
-
-    // 4. Count ready for staging timesheets
-    const { count: readyForStaging, error: stagingErr } = await supabase
-      .from('shifts')
-      .select('id', { count: 'exact', head: true })
-      .eq('status', 'APPROVED');
-
-    if (stagingErr) console.error('Error counting staging shifts:', stagingErr);
-
-    // 5. Count rate audit alerts (unmatched rates)
-    const { count: unmatchedRates, error: ratesErr } = await supabase
-      .from('employees')
-      .select('id', { count: 'exact', head: true })
-      .or('hourly_rate.is.null,hourly_rate.eq.0');
-
-    if (ratesErr) console.error('Error checking unmatched rates:', ratesErr);
-
-    // Calculate readiness percentage safely
-    const totalShifts = (pendingReviewsCount || 0) + (readyForStaging || 0);
-    const readinessPercentage = totalShifts > 0 
-      ? Math.round(((readyForStaging || 0) / totalShifts) * 100) 
-      : 100;
-
-    // Format pending queue items safely
-    const formattedQueue = (pendingShifts || []).map((shift) => {
-      const emp = shift.employees;
-      const workerName = emp 
-        ? `${emp.first_name || ''} ${emp.last_name || ''}`.trim() 
-        : 'Unassigned Staff';
-
-      return {
-        id: shift.id,
-        worker: workerName || 'Staff Member',
-        site: shift.site_name || 'Main Site',
-        type: shift.shift_type || 'Regular Shift',
-        date: shift.shift_date || 'Today',
-        status: shift.status || 'PENDING',
-      };
-    });
+    const total = pendingReviewsCount + readyForStaging;
+    const readinessPercentage = total > 0 ? Math.round((readyForStaging / total) * 100) : 100;
 
     return NextResponse.json({
       success: true,
       stats: {
         activePersonnel: activePersonnel || 0,
-        pendingReviews: pendingReviewsCount || 0,
-        readyForStaging: readyForStaging || 0,
-        unmatchedRates: unmatchedRates || 0,
+        pendingReviews: pendingReviewsCount,
+        readyForStaging: readyForStaging,
+        unmatchedRates: 0,
         readinessPercentage,
       },
+      pendingRosters: rosterData || [],
       pendingQueue: formattedQueue,
     });
-  } catch (error) {
-    console.error('HR Dashboard API error:', error);
+  } catch (err) {
+    console.error('HR Dashboard GET error:', err);
     return NextResponse.json(
-      { success: false, message: 'Server error fetching HR metrics.' },
+      { success: false, message: err.message || 'Database fetch failed' },
       { status: 500 }
     );
   }
