@@ -23,7 +23,6 @@ export default function LoginPage() {
   const [error, setError] = useState('');
   const [successMsg, setSuccessMsg] = useState('');
 
-  // Helper to turn backend roles into user-friendly display labels
   const formatRoleLabel = (roleStr) => {
     switch (roleStr) {
       case 'site_clerk':
@@ -59,7 +58,6 @@ export default function LoginPage() {
     }
 
     try {
-      // 1. Authenticate with Supabase Auth
       const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
         email: cleanEmail,
         password,
@@ -83,7 +81,6 @@ export default function LoginPage() {
         throw new Error('Authentication succeeded, but no user context was returned.');
       }
 
-      // 2. Fetch User Profile & Role
       const { data: profile, error: profileError } = await supabase
         .from('profiles')
         .select('role')
@@ -99,14 +96,11 @@ export default function LoginPage() {
         throw new Error('Your account is registered but missing a designated role. Please contact a system administrator.');
       }
 
-      // 3. System Feedback & Navigation Based on Assigned Role
       const rawRole = profile.role.toLowerCase().trim();
       const displayRole = formatRoleLabel(rawRole);
 
-      // Trigger user feedback prompt
       setSuccessMsg(`Login successful! Redirecting as ${displayRole}...`);
 
-      // Determine Target Route
       let targetUrl = '/clock-in';
       switch (rawRole) {
         case 'admin':
@@ -133,7 +127,6 @@ export default function LoginPage() {
           break;
       }
 
-      // Brief delay to let the user read the feedback before page switch
       setTimeout(() => {
         window.location.href = targetUrl;
       }, 1000);
@@ -146,15 +139,12 @@ export default function LoginPage() {
 
   return (
     <div className="relative min-h-screen w-full flex items-center justify-center bg-slate-950 text-slate-100 overflow-hidden px-4 sm:px-6 lg:px-8 selection:bg-indigo-500 selection:text-white">
-      {/* Background Decorative Ambient Gradients */}
       <div className="absolute top-1/4 -left-20 w-96 h-96 bg-indigo-600/20 rounded-full blur-[128px] pointer-events-none" />
       <div className="absolute bottom-1/4 -right-20 w-96 h-96 bg-violet-600/20 rounded-full blur-[128px] pointer-events-none" />
       <div className="absolute inset-0 bg-[radial-gradient(#1e293b_1px,transparent_1px)] [background-size:24px_24px] opacity-30 pointer-events-none" />
 
-      {/* Main Container */}
       <div className="relative w-full max-w-md backdrop-blur-2xl bg-slate-900/60 border border-slate-800/80 p-8 sm:p-10 rounded-3xl shadow-[0_0_50px_rgba(0,0,0,0.5)] space-y-8">
         
-        {/* Header Section */}
         <div className="space-y-3 text-center">
           <div className="inline-flex items-center space-x-2 px-3 py-1 rounded-full bg-indigo-500/10 border border-indigo-500/20 text-indigo-400 text-xs font-semibold tracking-wide uppercase">
             <Sparkles className="w-3.5 h-3.5" />
@@ -175,7 +165,6 @@ export default function LoginPage() {
           </p>
         </div>
 
-        {/* System Feedback: Success Alert Box */}
         {successMsg && (
           <div className="p-4 rounded-2xl bg-emerald-500/10 border border-emerald-500/20 flex items-center space-x-3 text-emerald-300 text-xs sm:text-sm animate-in fade-in duration-200">
             <CheckCircle2 className="w-5 h-5 text-emerald-400 shrink-0" />
@@ -183,7 +172,6 @@ export default function LoginPage() {
           </div>
         )}
 
-        {/* System Feedback: Error Alert Box */}
         {error && (
           <div className="p-4 rounded-2xl bg-rose-500/10 border border-rose-500/20 flex items-start space-x-3 text-rose-300 text-xs sm:text-sm animate-in fade-in duration-200">
             <ShieldAlert className="w-5 h-5 text-rose-400 shrink-0 mt-0.5" />
@@ -191,9 +179,7 @@ export default function LoginPage() {
           </div>
         )}
 
-        {/* Form */}
-        <form onSubmit={handleLogin} className="space-y-5">
-          {/* Email Field */}
+        <form onSubmit={handleLogin} className="space-y-5" suppressHydrationWarning>
           <div className="space-y-2">
             <label className="block text-xs font-semibold uppercase tracking-wider text-slate-300">
               Company Email
@@ -205,6 +191,7 @@ export default function LoginPage() {
               <input
                 type="email"
                 required
+                suppressHydrationWarning
                 disabled={loading || Boolean(successMsg)}
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
@@ -214,7 +201,6 @@ export default function LoginPage() {
             </div>
           </div>
 
-          {/* Password Field */}
           <div className="space-y-2">
             <label className="block text-xs font-semibold uppercase tracking-wider text-slate-300">
               Password
@@ -226,6 +212,7 @@ export default function LoginPage() {
               <input
                 type={showPassword ? 'text' : 'password'}
                 required
+                suppressHydrationWarning
                 disabled={loading || Boolean(successMsg)}
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
@@ -234,6 +221,7 @@ export default function LoginPage() {
               />
               <button
                 type="button"
+                suppressHydrationWarning
                 onClick={() => setShowPassword(!showPassword)}
                 className="absolute inset-y-0 right-0 pr-4 flex items-center text-slate-500 hover:text-slate-200 transition-colors"
                 aria-label={showPassword ? 'Hide password' : 'Show password'}
@@ -243,9 +231,9 @@ export default function LoginPage() {
             </div>
           </div>
 
-          {/* Submit Button */}
           <button
             type="submit"
+            suppressHydrationWarning
             disabled={loading || Boolean(successMsg)}
             className="w-full relative group overflow-hidden flex items-center justify-center space-x-2 py-3.5 px-4 rounded-xl bg-indigo-600 hover:bg-indigo-500 active:bg-indigo-700 text-white font-semibold text-sm transition-all duration-200 shadow-lg shadow-indigo-600/25 disabled:opacity-50 disabled:cursor-not-allowed focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 focus:ring-offset-slate-950"
           >
@@ -263,7 +251,6 @@ export default function LoginPage() {
           </button>
         </form>
 
-        {/* Footer Info */}
         <div className="pt-2 border-t border-slate-800/60 text-center">
           <p className="text-xs text-slate-500">
             Protected with row-level encryption and secure middleware authorization.
