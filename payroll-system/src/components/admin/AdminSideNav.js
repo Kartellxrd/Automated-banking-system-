@@ -36,7 +36,6 @@ export default function AdminSideNav() {
     }
   };
 
-  // Strictly Admin-only platform features
   const navItems = [
     {
       name: 'Dashboard Overview',
@@ -46,9 +45,14 @@ export default function AdminSideNav() {
       exact: true,
     },
     {
-      name: 'User Provisioning',
+      name: 'System Users',
       href: '/dashboard/admin/users',
       icon: Users,
+    },
+    {
+      name: 'Sites',
+      href: '/dashboard/admin/sites',
+      icon: Building2,
     },
     {
       name: 'Access & Role Matrix',
@@ -115,7 +119,6 @@ export default function AdminSideNav() {
 
   return (
     <>
-      {/* Mobile Top Navigation Header */}
       <div className="lg:hidden bg-white border-b border-slate-200 p-4 flex items-center justify-between sticky top-0 z-40 shadow-sm">
         <div className="flex items-center gap-3">
           <div className="p-2 rounded-xl bg-indigo-50 border border-indigo-100 text-indigo-600">
@@ -134,7 +137,6 @@ export default function AdminSideNav() {
         </button>
       </div>
 
-      {/* Mobile Drawer Overlay */}
       {mobileMenuOpen && (
         <div className="lg:hidden fixed inset-0 z-50 bg-slate-900/40 backdrop-blur-sm flex">
           <div className="w-72 bg-white border-r border-slate-200 p-5 flex flex-col justify-between h-full shadow-2xl">
@@ -156,7 +158,6 @@ export default function AdminSideNav() {
                   <X className="w-5 h-5" />
                 </button>
               </div>
-
               {renderNavLinks()}
             </div>
 
@@ -173,10 +174,8 @@ export default function AdminSideNav() {
         </div>
       )}
 
-      {/* Desktop Persistent Sidebar */}
       <aside className="hidden lg:flex w-64 bg-white border-r border-slate-200 p-5 flex-col justify-between shrink-0 sticky top-0 h-screen shadow-sm">
         <div className="space-y-6">
-          {/* Brand Header */}
           <div className="flex items-center gap-3 border-b border-slate-100 pb-4">
             <div className="p-2.5 rounded-xl bg-indigo-50 border border-indigo-100 text-indigo-600">
               <Building2 className="w-5 h-5" />
@@ -186,12 +185,9 @@ export default function AdminSideNav() {
               <p className="text-[10px] text-indigo-600 font-bold uppercase tracking-wider mt-1">Admin Control Center</p>
             </div>
           </div>
-
-          {/* Navigation Links */}
           {renderNavLinks()}
         </div>
 
-        {/* Footer / Sign Out */}
         <div className="pt-4 border-t border-slate-100">
           <button
             onClick={handleLogout}
