@@ -2,17 +2,17 @@
 
 import { useState } from 'react';
 import { supabase } from '@/lib/supabase';
-import { 
-  Mail, 
-  Lock, 
-  Eye, 
-  EyeOff, 
-  ArrowRight, 
-  ShieldAlert, 
-  Loader2, 
-  Sparkles, 
+import {
+  Mail,
+  Lock,
+  Eye,
+  EyeOff,
+  ArrowRight,
+  ShieldAlert,
+  Loader2,
+  Sparkles,
   Building2,
-  CheckCircle2 
+  CheckCircle2,
 } from 'lucide-react';
 
 export default function LoginPage() {
@@ -39,7 +39,7 @@ export default function LoginPage() {
       case 'worker':
         return 'Field Worker';
       default:
-        return roleStr.charAt(0).toUpperCase() + roleStr.slice(1);
+        return roleStr ? roleStr.charAt(0).toUpperCase() + roleStr.slice(1) : 'User';
     }
   };
 
@@ -67,13 +67,17 @@ export default function LoginPage() {
         const msg = authError.message.toLowerCase();
         if (msg.includes('invalid login credentials')) {
           throw new Error('Incorrect email or password. Please verify your details and try again.');
-        } else if (msg.includes('email not confirmed')) {
-          throw new Error('Your email address has not been verified yet.');
-        } else if (msg.includes('too many requests') || msg.includes('rate limit')) {
-          throw new Error('Too many attempts. Please wait a few moments before trying again.');
-        } else {
-          throw new Error(authError.message);
         }
+        if (msg.includes('email not confirmed')) {
+          throw new Error('Your email address has not been verified yet.');
+        }
+        if (msg.includes('banned')) {
+          throw new Error('This account has been deactivated. Contact a system administrator.');
+        }
+        if (msg.includes('too many requests') || msg.includes('rate limit')) {
+          throw new Error('Too many attempts. Please wait a few moments before trying again.');
+        }
+        throw new Error(authError.message);
       }
 
       const user = authData?.user;
@@ -83,22 +87,35 @@ export default function LoginPage() {
 
       const { data: profile, error: profileError } = await supabase
         .from('profiles')
-        .select('role')
+        .select('role, is_active, must_change_password')
         .eq('id', user.id)
         .maybeSingle();
 
       if (profileError) {
         console.error('Profile fetch error:', profileError);
-        throw new Error('Could not retrieve user profile roles. Please ensure database migrations are complete.');
+        throw new Error('Could not retrieve your system profile.');
       }
 
       if (!profile || !profile.role) {
-        throw new Error('Your account is registered but missing a designated role. Please contact a system administrator.');
+        await supabase.auth.signOut();
+        throw new Error('Your account is missing a system role. Contact a system administrator.');
+      }
+
+      if (profile.is_active === false) {
+        await supabase.auth.signOut();
+        throw new Error('This account has been deactivated. Contact a system administrator.');
+      }
+
+      if (profile.must_change_password === true) {
+        setSuccessMsg('Temporary password accepted. Redirecting you to set a new password...');
+        setTimeout(() => {
+          window.location.href = '/change-password';
+        }, 700);
+        return;
       }
 
       const rawRole = profile.role.toLowerCase().trim();
       const displayRole = formatRoleLabel(rawRole);
-
       setSuccessMsg(`Login successful! Redirecting as ${displayRole}...`);
 
       let targetUrl = '/clock-in';
@@ -129,8 +146,7 @@ export default function LoginPage() {
 
       setTimeout(() => {
         window.location.href = targetUrl;
-      }, 1000);
-
+      }, 900);
     } catch (err) {
       setError(err.message || 'An unexpected error occurred during sign in.');
       setLoading(false);
@@ -144,36 +160,31 @@ export default function LoginPage() {
       <div className="absolute inset-0 bg-[radial-gradient(#1e293b_1px,transparent_1px)] [background-size:24px_24px] opacity-30 pointer-events-none" />
 
       <div className="relative w-full max-w-md backdrop-blur-2xl bg-slate-900/60 border border-slate-800/80 p-8 sm:p-10 rounded-3xl shadow-[0_0_50px_rgba(0,0,0,0.5)] space-y-8">
-        
         <div className="space-y-3 text-center">
           <div className="inline-flex items-center space-x-2 px-3 py-1 rounded-full bg-indigo-500/10 border border-indigo-500/20 text-indigo-400 text-xs font-semibold tracking-wide uppercase">
             <Sparkles className="w-3.5 h-3.5" />
             <span>Enterprise Gateway</span>
           </div>
-          
+
           <div className="flex justify-center items-center space-x-2 text-white pt-1">
             <div className="p-2.5 rounded-2xl bg-indigo-600/20 border border-indigo-500/30 text-indigo-400">
               <Building2 className="w-6 h-6" />
             </div>
           </div>
 
-          <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight text-white">
-            Welcome back
-          </h1>
-          <p className="text-xs sm:text-sm text-slate-400">
-            Sign in with your credentials to access your portal.
-          </p>
+          <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight text-white">Welcome back</h1>
+          <p className="text-xs sm:text-sm text-slate-400">Sign in with your credentials to access your portal.</p>
         </div>
 
         {successMsg && (
-          <div className="p-4 rounded-2xl bg-emerald-500/10 border border-emerald-500/20 flex items-center space-x-3 text-emerald-300 text-xs sm:text-sm animate-in fade-in duration-200">
+          <div className="p-4 rounded-2xl bg-emerald-500/10 border border-emerald-500/20 flex items-center space-x-3 text-emerald-300 text-xs sm:text-sm">
             <CheckCircle2 className="w-5 h-5 text-emerald-400 shrink-0" />
             <span className="font-semibold leading-relaxed">{successMsg}</span>
           </div>
         )}
 
         {error && (
-          <div className="p-4 rounded-2xl bg-rose-500/10 border border-rose-500/20 flex items-start space-x-3 text-rose-300 text-xs sm:text-sm animate-in fade-in duration-200">
+          <div className="p-4 rounded-2xl bg-rose-500/10 border border-rose-500/20 flex items-start space-x-3 text-rose-300 text-xs sm:text-sm">
             <ShieldAlert className="w-5 h-5 text-rose-400 shrink-0 mt-0.5" />
             <span className="font-medium leading-relaxed">{error}</span>
           </div>
@@ -181,9 +192,7 @@ export default function LoginPage() {
 
         <form onSubmit={handleLogin} className="space-y-5" suppressHydrationWarning>
           <div className="space-y-2">
-            <label className="block text-xs font-semibold uppercase tracking-wider text-slate-300">
-              Company Email
-            </label>
+            <label className="block text-xs font-semibold uppercase tracking-wider text-slate-300">Company Email</label>
             <div className="relative group">
               <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none text-slate-500 group-focus-within:text-indigo-400 transition-colors">
                 <Mail className="h-4 w-4" />
@@ -202,9 +211,7 @@ export default function LoginPage() {
           </div>
 
           <div className="space-y-2">
-            <label className="block text-xs font-semibold uppercase tracking-wider text-slate-300">
-              Password
-            </label>
+            <label className="block text-xs font-semibold uppercase tracking-wider text-slate-300">Password</label>
             <div className="relative group">
               <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none text-slate-500 group-focus-within:text-indigo-400 transition-colors">
                 <Lock className="h-4 w-4" />
@@ -252,9 +259,7 @@ export default function LoginPage() {
         </form>
 
         <div className="pt-2 border-t border-slate-800/60 text-center">
-          <p className="text-xs text-slate-500">
-            Protected with row-level encryption and secure middleware authorization.
-          </p>
+          <p className="text-xs text-slate-500">Protected by authenticated role checks and server-side access controls.</p>
         </div>
       </div>
     </div>
