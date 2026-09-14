@@ -23,13 +23,31 @@ export async function GET() {
 
     const { data, error } = await supabaseAdmin
       .from('profiles')
-      .select('id, first_name, last_name, email, role, is_active, created_at, created_by')
+      .select(`
+        id,
+        first_name,
+        last_name,
+        email,
+        role,
+        is_active,
+        must_change_password,
+        deactivated_at,
+        last_password_reset_at,
+        created_at,
+        created_by,
+        updated_at,
+        updated_by
+      `)
       .in('role', SYSTEM_ROLES)
       .order('created_at', { ascending: false });
 
     if (error) throw error;
 
-    return NextResponse.json({ success: true, data: data || [] });
+    return NextResponse.json({
+      success: true,
+      data: data || [],
+      current_user_id: access.user.id,
+    });
   } catch (error) {
     console.error('Admin users GET error:', error);
     return NextResponse.json(
@@ -127,12 +145,14 @@ export async function POST(request) {
           email,
           role,
           is_active: true,
+          must_change_password: true,
           created_by: access.user.id,
+          updated_by: access.user.id,
           updated_at: new Date().toISOString(),
         },
         { onConflict: 'id' }
       )
-      .select('id, first_name, last_name, email, role, is_active, created_at')
+      .select('id, first_name, last_name, email, role, is_active, must_change_password, created_at')
       .single();
 
     if (profileError) {
