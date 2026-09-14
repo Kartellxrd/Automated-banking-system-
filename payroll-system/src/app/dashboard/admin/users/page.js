@@ -1,368 +1,277 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
-  UserPlus,
-  Users,
-  RefreshCw,
-  CheckCircle2,
   AlertCircle,
-  Lock,
-  Eye,
-  X,
-  ChevronDown,
+  CheckCircle2,
+  KeyRound,
+  Loader2,
+  Plus,
+  RefreshCw,
   Search,
   ShieldCheck,
-  Building2,
   UserCheck,
-  Wand2,
-  MapPin,
-  Calendar,
-  Mail
+  Users,
+  X,
 } from 'lucide-react';
-import { supabase } from '@/lib/supabase';
 import AdminNavbar from '@/components/admin/AdminNavbar';
 import AdminSideNav from '@/components/admin/AdminSideNav';
 
-export default function UserProvisioningPage() {
+const SYSTEM_ROLES = [
+  { value: 'site_clerk', label: 'Site Clerk' },
+  { value: 'hr', label: 'HR Manager' },
+  { value: 'accountant', label: 'Accountant' },
+  { value: 'ceo', label: 'CEO / Executive' },
+  { value: 'admin', label: 'System Admin' },
+];
+
+const EMPTY_FORM = {
+  first_name: '',
+  last_name: '',
+  email: '',
+  password: '',
+  role: 'site_clerk',
+};
+
+function roleLabel(role) {
+  return SYSTEM_ROLES.find((item) => item.value === role)?.label || role || 'Unknown';
+}
+
+export default function AdminUsersPage() {
   const [users, setUsers] = useState([]);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
-  const [updatingRoleId, setUpdatingRoleId] = useState(null);
-  const [message, setMessage] = useState({ type: '', text: '' });
-  
-  // Modal & Selection States
-  const [selectedProfile, setSelectedProfile] = useState(null);
-  const [isProvisionModalOpen, setIsProvisionModalOpen] = useState(false);
-  
-  // Search & Filter States
-  const [searchQuery, setSearchQuery] = useState('');
+  const [search, setSearch] = useState('');
   const [roleFilter, setRoleFilter] = useState('ALL');
+  const [showCreateModal, setShowCreateModal] = useState(false);
+  const [form, setForm] = useState(EMPTY_FORM);
+  const [message, setMessage] = useState({ type: '', text: '' });
 
-  // Company domain setting for email auto-generation
-  const COMPANY_DOMAIN = 'periscope.co.bw';
+  async function fetchUsers() {
+    setLoading(true);
+    try {
+      const response = await fetch('/api/admin/users', { cache: 'no-store' });
+      const result = await response.json();
 
-  // New Provision Form Data
-  const [formData, setFormData] = useState({
-    first_name: '',
-    last_name: '',
-    email: '',
-    password: '',
-    role: 'worker',
-    site_location: 'Headquarters'
-  });
+      if (!response.ok || !result.success) {
+        throw new Error(result.error || 'Failed to load system users.');
+      }
+
+      setUsers(result.data || []);
+    } catch (error) {
+      setMessage({ type: 'error', text: error.message });
+    } finally {
+      setLoading(false);
+    }
+  }
 
   useEffect(() => {
     fetchUsers();
   }, []);
 
-  // Auto-generate Company Email from First and Last Name
-  const handleNameChange = (field, value) => {
-    const updatedForm = { ...formData, [field]: value };
-    const firstName = updatedForm.first_name.trim().toLowerCase();
-    const lastName = updatedForm.last_name.trim().toLowerCase().replace(/\s+/g, '');
+  function handleNameChange(field, value) {
+    setForm((current) => {
+      const next = { ...current, [field]: value };
+      const first = next.first_name.trim().toLowerCase();
+      const last = next.last_name.trim().toLowerCase().replace(/[^a-z0-9]/g, '');
 
-    if (firstName && lastName) {
-      updatedForm.email = `${firstName[0]}.${lastName}@${COMPANY_DOMAIN}`;
-    } else if (lastName) {
-      updatedForm.email = `${lastName}@${COMPANY_DOMAIN}`;
+      if (first && last && !current.email.trim()) {
+        next.email = `${first[0]}.${last}@periscope.co.bw`;
+      }
+
+      return next;
+    });
+  }
+
+  function generatePassword() {
+    const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789!@#$%';
+    let value = '';
+    for (let i = 0; i < 12; i += 1) {
+      value += alphabet[Math.floor(Math.random() * alphabet.length)];
     }
+    setForm((current) => ({ ...current, password: value }));
+  }
 
-    setFormData(updatedForm);
-  };
-
-  // Generate Random Temporary Password
-  const generateRandomPassword = () => {
-    const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@#$%';
-    let randPass = '';
-    for (let i = 0; i < 10; i++) {
-      randPass += chars.charAt(Math.floor(Math.random() * chars.length));
-    }
-    setFormData((prev) => ({ ...prev, password: randPass }));
-  };
-
-  // Fetch Users from Supabase
-  const fetchUsers = async () => {
-    setLoading(true);
-    try {
-      const { data, error } = await supabase
-        .from('profiles')
-        .select('*')
-        .order('created_at', { ascending: false });
-
-      if (error) throw error;
-      setUsers(data || []);
-    } catch (err) {
-      console.error('Error fetching profiles:', err);
-      setMessage({ type: 'error', text: 'Failed to fetch users list.' });
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  // Provision User API Call
-  const handleCreateUser = async (e) => {
-    e.preventDefault();
+  async function handleCreateUser(event) {
+    event.preventDefault();
     setSubmitting(true);
     setMessage({ type: '', text: '' });
 
     try {
-      const res = await fetch('/api/admin/create-user', {
+      const response = await fetch('/api/admin/users', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(formData)
+        body: JSON.stringify(form),
       });
 
-      const result = await res.json();
+      const result = await response.json();
 
-      if (!res.ok || !result.success) {
-        throw new Error(result.error || 'Failed to provision user account');
+      if (!response.ok || !result.success) {
+        throw new Error(result.error || 'Failed to create system user.');
       }
 
-      setMessage({ type: 'success', text: result.message || 'User provisioned successfully!' });
-      setFormData({
-        first_name: '',
-        last_name: '',
-        email: '',
-        password: '',
-        role: 'worker',
-        site_location: 'Headquarters'
-      });
-      setIsProvisionModalOpen(false);
-      fetchUsers();
-    } catch (err) {
-      setMessage({ type: 'error', text: err.message });
+      setMessage({ type: 'success', text: result.message });
+      setForm(EMPTY_FORM);
+      setShowCreateModal(false);
+      await fetchUsers();
+    } catch (error) {
+      setMessage({ type: 'error', text: error.message });
     } finally {
       setSubmitting(false);
     }
-  };
+  }
 
-  // Dynamic Role Update Direct to Supabase
-  const handleRoleChange = async (userId, newRole) => {
-    setUpdatingRoleId(userId);
-    try {
-      const { error } = await supabase
-        .from('profiles')
-        .update({ role: newRole })
-        .eq('id', userId);
+  const filteredUsers = useMemo(() => {
+    const q = search.trim().toLowerCase();
 
-      if (error) throw error;
+    return users.filter((user) => {
+      const name = `${user.first_name || ''} ${user.last_name || ''}`.toLowerCase();
+      const email = (user.email || '').toLowerCase();
+      const matchesSearch = !q || name.includes(q) || email.includes(q);
+      const matchesRole = roleFilter === 'ALL' || user.role === roleFilter;
+      return matchesSearch && matchesRole;
+    });
+  }, [users, search, roleFilter]);
 
-      setUsers((prev) =>
-        prev.map((u) => (u.id === userId ? { ...u, role: newRole } : u))
-      );
-      setMessage({ type: 'success', text: 'User role updated successfully.' });
-    } catch (err) {
-      setMessage({ type: 'error', text: err.message || 'Failed to update role' });
-    } finally {
-      setUpdatingRoleId(null);
-    }
-  };
-
-  // Filter Logic
-  const filteredUsers = users.filter((u) => {
-    const fullName = `${u.first_name || ''} ${u.last_name || ''}`.toLowerCase();
-    const email = (u.email || '').toLowerCase();
-    const query = searchQuery.toLowerCase();
-    const matchesSearch = fullName.includes(query) || email.includes(query);
-    const matchesRole = roleFilter === 'ALL' || u.role === roleFilter;
-
-    return matchesSearch && matchesRole;
-  });
-
-  // Calculate System Counts
-  const totalUsers = users.length;
-  const workersCount = users.filter((u) => u.role === 'worker').length;
-  const siteClerksCount = users.filter((u) => u.role === 'site_clerk').length;
-  const adminCount = users.filter((u) => u.role === 'admin').length;
-  const managementCount = users.filter((u) => ['hr', 'accountant', 'ceo'].includes(u.role)).length;
+  const activeUsers = users.filter((user) => user.is_active !== false).length;
+  const siteClerks = users.filter((user) => user.role === 'site_clerk').length;
+  const management = users.filter((user) => ['hr', 'accountant', 'ceo'].includes(user.role)).length;
 
   return (
-    <div className="min-h-screen bg-slate-100 text-slate-900 flex flex-col lg:flex-row font-sans">
+    <div className="min-h-screen bg-slate-100 text-slate-900 flex flex-col lg:flex-row">
       <AdminSideNav />
 
-      <main className="flex-1 p-3 sm:p-6 lg:p-8 space-y-5 sm:space-y-6 overflow-x-hidden">
-        <AdminNavbar title="User Provisioning & Access Control" />
+      <main className="flex-1 p-4 sm:p-6 lg:p-8 space-y-6 overflow-x-hidden">
+        <AdminNavbar title="System Users" />
 
-        {/* Global Toast Notification */}
         {message.text && (
           <div
-            className={`p-3.5 sm:p-4 rounded-2xl text-xs font-semibold flex items-center justify-between shadow-xs transition animate-in fade-in ${
+            className={`flex items-center justify-between gap-3 rounded-2xl border px-4 py-3 text-sm font-medium ${
               message.type === 'success'
-                ? 'bg-emerald-50 text-emerald-800 border border-emerald-200'
-                : 'bg-rose-50 text-rose-800 border border-rose-200'
+                ? 'border-emerald-200 bg-emerald-50 text-emerald-800'
+                : 'border-rose-200 bg-rose-50 text-rose-800'
             }`}
           >
-            <div className="flex items-center gap-2.5">
+            <div className="flex items-center gap-2">
               {message.type === 'success' ? (
-                <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                <CheckCircle2 className="h-4 w-4 shrink-0" />
               ) : (
-                <AlertCircle className="w-4 h-4 text-rose-600 shrink-0" />
+                <AlertCircle className="h-4 w-4 shrink-0" />
               )}
-              <span className="leading-snug">{message.text}</span>
+              <span>{message.text}</span>
             </div>
-            <button onClick={() => setMessage({ type: '', text: '' })} className="p-1 hover:opacity-75 shrink-0">
-              <X className="w-4 h-4" />
+            <button onClick={() => setMessage({ type: '', text: '' })} aria-label="Dismiss message">
+              <X className="h-4 w-4" />
             </button>
           </div>
         )}
 
-        {/* Metrics Row */}
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
-          <div className="bg-white border border-slate-200 p-4 sm:p-5 rounded-2xl flex items-center justify-between shadow-xs">
-            <div>
-              <p className="text-[10px] sm:text-xs font-semibold text-slate-500 uppercase tracking-wider">Total Accounts</p>
-              <p className="text-xl sm:text-2xl font-bold text-slate-900 mt-0.5 sm:mt-1">{totalUsers}</p>
-            </div>
-            <div className="p-2.5 sm:p-3 bg-indigo-50 border border-indigo-100 rounded-xl text-indigo-600 shrink-0">
-              <Users className="w-4 h-4 sm:w-5 sm:h-5" />
-            </div>
-          </div>
+        <section className="grid grid-cols-2 xl:grid-cols-4 gap-3 sm:gap-4">
+          <MetricCard title="System Users" value={users.length} icon={Users} />
+          <MetricCard title="Active Accounts" value={activeUsers} icon={UserCheck} />
+          <MetricCard title="Site Clerks" value={siteClerks} icon={ShieldCheck} />
+          <MetricCard title="Management" value={management} icon={KeyRound} />
+        </section>
 
-          <div className="bg-white border border-slate-200 p-4 sm:p-5 rounded-2xl flex items-center justify-between shadow-xs">
+        <section className="rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden">
+          <div className="p-5 sm:p-6 border-b border-slate-200 flex flex-col xl:flex-row xl:items-center justify-between gap-4">
             <div>
-              <p className="text-[10px] sm:text-xs font-semibold text-slate-500 uppercase tracking-wider">Field Workers</p>
-              <p className="text-xl sm:text-2xl font-bold text-slate-900 mt-0.5 sm:mt-1">{workersCount}</p>
-            </div>
-            <div className="p-2.5 sm:p-3 bg-blue-50 border border-blue-100 rounded-xl text-blue-600 shrink-0">
-              <Users className="w-4 h-4 sm:w-5 sm:h-5" />
-            </div>
-          </div>
-
-          <div className="bg-white border border-slate-200 p-4 sm:p-5 rounded-2xl flex items-center justify-between shadow-xs">
-            <div>
-              <p className="text-[10px] sm:text-xs font-semibold text-slate-500 uppercase tracking-wider">Site Clerks</p>
-              <p className="text-xl sm:text-2xl font-bold text-slate-900 mt-0.5 sm:mt-1">{siteClerksCount}</p>
-            </div>
-            <div className="p-2.5 sm:p-3 bg-sky-50 border border-sky-100 rounded-xl text-sky-600 shrink-0">
-              <UserCheck className="w-4 h-4 sm:w-5 sm:h-5" />
-            </div>
-          </div>
-
-          <div className="bg-white border border-slate-200 p-4 sm:p-5 rounded-2xl flex items-center justify-between shadow-xs">
-            <div>
-              <p className="text-[10px] sm:text-xs font-semibold text-slate-500 uppercase tracking-wider">Admins & Execs</p>
-              <p className="text-xl sm:text-2xl font-bold text-amber-600 mt-0.5 sm:mt-1">{adminCount + managementCount}</p>
-            </div>
-            <div className="p-2.5 sm:p-3 bg-amber-50 border border-amber-100 rounded-xl text-amber-600 shrink-0">
-              <ShieldCheck className="w-4 h-4 sm:w-5 sm:h-5" />
-            </div>
-          </div>
-        </div>
-
-        {/* Directory Card */}
-        <div className="bg-white p-4 sm:p-6 rounded-2xl border border-slate-200 space-y-4 shadow-xs">
-          <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 border-b border-slate-200 pb-4">
-            <div>
-              <h2 className="font-bold text-slate-900 text-sm sm:text-base">Provisioned System Users</h2>
-              <p className="text-[11px] text-slate-500 font-medium">Manage corporate identities, assign privileges, and inspect accounts</p>
+              <h1 className="text-lg font-bold text-slate-950">Provisioned System Users</h1>
+              <p className="text-sm text-slate-500 mt-1">
+                Login accounts for Admin, Site Clerk, HR, Accountant and CEO roles.
+              </p>
             </div>
 
-            <div className="flex flex-wrap items-center gap-2.5">
-              <div className="relative flex-1 sm:flex-none min-w-[160px]">
+            <div className="flex flex-col sm:flex-row gap-2">
+              <div className="relative">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
                 <input
-                  type="text"
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  placeholder="Search name or email..."
-                  className="w-full pl-8 pr-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-900 outline-none focus:border-indigo-600 focus:bg-white transition"
+                  value={search}
+                  onChange={(event) => setSearch(event.target.value)}
+                  placeholder="Search users..."
+                  className="w-full sm:w-56 pl-9 pr-3 py-2.5 rounded-xl border border-slate-200 bg-slate-50 text-sm outline-none focus:border-indigo-500 focus:bg-white"
                 />
-                <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-3" />
               </div>
 
               <select
                 value={roleFilter}
-                onChange={(e) => setRoleFilter(e.target.value)}
-                className="px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-700 font-semibold outline-none focus:border-indigo-600 cursor-pointer"
+                onChange={(event) => setRoleFilter(event.target.value)}
+                className="px-3 py-2.5 rounded-xl border border-slate-200 bg-slate-50 text-sm font-medium outline-none focus:border-indigo-500"
               >
-                <option value="ALL">All Roles</option>
-                <option value="worker">Field Workers</option>
-                <option value="site_clerk">Site Clerks</option>
-                <option value="hr">HR Managers</option>
-                <option value="accountant">Accountants</option>
-                <option value="ceo">CEOs</option>
-                <option value="admin">Admins</option>
+                <option value="ALL">All roles</option>
+                {SYSTEM_ROLES.map((role) => (
+                  <option key={role.value} value={role.value}>{role.label}</option>
+                ))}
               </select>
 
               <button
                 onClick={fetchUsers}
-                className="p-2 text-slate-600 hover:text-indigo-600 rounded-xl transition bg-slate-50 hover:bg-slate-100 border border-slate-200"
-                title="Refresh Table Data"
+                className="inline-flex items-center justify-center gap-2 px-3 py-2.5 rounded-xl border border-slate-200 bg-white text-sm font-semibold hover:bg-slate-50"
               >
-                <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin text-indigo-600' : ''}`} />
+                <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
+                Refresh
               </button>
 
               <button
-                onClick={() => setIsProvisionModalOpen(true)}
-                className="w-full sm:w-auto flex items-center justify-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold px-4 py-2 rounded-xl transition shadow-sm shadow-indigo-600/20"
+                onClick={() => setShowCreateModal(true)}
+                className="inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-indigo-600 text-white text-sm font-semibold hover:bg-indigo-700"
               >
-                <UserPlus className="w-4 h-4" />
-                <span>Provision User</span>
+                <Plus className="h-4 w-4" />
+                Create User
               </button>
             </div>
           </div>
 
-          {/* Desktop Table View (Hidden on mobile) */}
-          <div className="hidden sm:block overflow-x-auto">
-            <table className="w-full text-left text-xs">
-              <thead className="bg-slate-50 text-slate-500 font-bold border-b border-slate-200 uppercase tracking-wider">
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[760px] text-sm">
+              <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
                 <tr>
-                  <th className="py-3.5 px-3">Full Name</th>
-                  <th className="py-3.5 px-3">Email Address</th>
-                  <th className="py-3.5 px-3">Role</th>
-                  <th className="py-3.5 px-3">Site Location</th>
-                  <th className="py-3.5 px-3">Provisioned Date</th>
-                  <th className="py-3.5 px-3 text-right">Actions</th>
+                  <th className="px-5 py-3 text-left">User</th>
+                  <th className="px-5 py-3 text-left">Role</th>
+                  <th className="px-5 py-3 text-left">Status</th>
+                  <th className="px-5 py-3 text-left">Created</th>
+                  <th className="px-5 py-3 text-left">Access Management</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {filteredUsers.length === 0 ? (
+                {loading ? (
                   <tr>
-                    <td colSpan="6" className="py-8 text-center text-slate-400 font-medium">
-                      {loading ? 'Fetching records...' : 'No users found matching criteria.'}
+                    <td colSpan="5" className="px-5 py-12 text-center text-slate-500">
+                      <Loader2 className="h-5 w-5 animate-spin inline-block mr-2" /> Loading users...
                     </td>
+                  </tr>
+                ) : filteredUsers.length === 0 ? (
+                  <tr>
+                    <td colSpan="5" className="px-5 py-12 text-center text-slate-500">No system users found.</td>
                   </tr>
                 ) : (
                   filteredUsers.map((user) => (
-                    <tr key={user.id} className="hover:bg-slate-50/80 transition-colors">
-                      <td className="py-3.5 px-3 font-semibold text-slate-900">
-                        {user.first_name || user.last_name
-                          ? `${user.first_name || ''} ${user.last_name || ''}`.trim()
-                          : 'Unnamed Employee'}
-                      </td>
-                      <td className="py-3.5 px-3 text-slate-600 font-mono text-[11px]">{user.email}</td>
-                      <td className="py-3.5 px-3">
-                        <div className="relative inline-block">
-                          <select
-                            value={user.role || 'worker'}
-                            disabled={updatingRoleId === user.id}
-                            onChange={(e) => handleRoleChange(user.id, e.target.value)}
-                            className="text-[10px] font-extrabold px-2.5 py-1 rounded-lg uppercase border bg-indigo-50/60 border-indigo-200 text-indigo-700 appearance-none pr-6 cursor-pointer focus:outline-none focus:ring-1 focus:ring-indigo-500 disabled:opacity-50"
-                          >
-                            <option value="worker">Field Worker</option>
-                            <option value="site_clerk">Site Clerk</option>
-                            <option value="hr">HR Manager</option>
-                            <option value="accountant">Accountant</option>
-                            <option value="ceo">CEO</option>
-                            <option value="admin">Admin</option>
-                          </select>
-                          <ChevronDown className="w-3 h-3 absolute right-1.5 top-2 pointer-events-none text-indigo-500" />
+                    <tr key={user.id} className="hover:bg-slate-50/70">
+                      <td className="px-5 py-4">
+                        <div className="font-semibold text-slate-900">
+                          {[user.first_name, user.last_name].filter(Boolean).join(' ') || 'Unnamed user'}
                         </div>
+                        <div className="text-xs text-slate-500 mt-0.5">{user.email}</div>
                       </td>
-                      <td className="py-3.5 px-3 text-slate-500 font-medium">
-                        {user.site_location || 'Headquarters'}
+                      <td className="px-5 py-4">
+                        <span className="inline-flex rounded-full bg-indigo-50 border border-indigo-100 px-2.5 py-1 text-xs font-bold text-indigo-700">
+                          {roleLabel(user.role)}
+                        </span>
                       </td>
-                      <td className="py-3.5 px-3 text-slate-500 font-medium">
-                        {user.created_at ? new Date(user.created_at).toLocaleDateString() : 'System Default'}
+                      <td className="px-5 py-4">
+                        <span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-bold ${
+                          user.is_active === false
+                            ? 'bg-slate-100 text-slate-600'
+                            : 'bg-emerald-50 text-emerald-700'
+                        }`}>
+                          {user.is_active === false ? 'Inactive' : 'Active'}
+                        </span>
                       </td>
-                      <td className="py-3.5 px-3 text-right">
-                        <button
-                          onClick={() => setSelectedProfile(user)}
-                          className="p-1.5 text-slate-500 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition"
-                          title="Inspect Profile"
-                        >
-                          <Eye className="w-4 h-4" />
-                        </button>
+                      <td className="px-5 py-4 text-slate-600">
+                        {user.created_at ? new Date(user.created_at).toLocaleDateString() : '—'}
+                      </td>
+                      <td className="px-5 py-4 text-xs text-slate-400">
+                        Role/status/reset controls are the next Admin feature.
                       </td>
                     </tr>
                   ))
@@ -370,192 +279,113 @@ export default function UserProvisioningPage() {
               </tbody>
             </table>
           </div>
-
-          {/* Mobile Card Layout (Visible only on small screens) */}
-          <div className="block sm:hidden space-y-3">
-            {filteredUsers.length === 0 ? (
-              <div className="py-8 text-center text-slate-400 font-medium text-xs">
-                {loading ? 'Fetching records...' : 'No users found matching criteria.'}
-              </div>
-            ) : (
-              filteredUsers.map((user) => (
-                <div key={user.id} className="p-4 bg-slate-50/80 border border-slate-200/80 rounded-xl space-y-3">
-                  <div className="flex items-start justify-between gap-2">
-                    <div>
-                      <h3 className="font-bold text-slate-900 text-xs sm:text-sm">
-                        {user.first_name || user.last_name
-                          ? `${user.first_name || ''} ${user.last_name || ''}`.trim()
-                          : 'Unnamed Employee'}
-                      </h3>
-                      <p className="text-[11px] text-slate-500 font-mono mt-0.5">{user.email}</p>
-                    </div>
-                    <button
-                      onClick={() => setSelectedProfile(user)}
-                      className="p-1.5 text-slate-500 hover:text-indigo-600 hover:bg-white rounded-lg border border-slate-200 transition"
-                      title="Inspect Profile"
-                    >
-                      <Eye className="w-4 h-4" />
-                    </button>
-                  </div>
-
-                  <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-slate-200/60 text-[11px]">
-                    <div className="flex items-center gap-1.5 text-slate-600 font-medium">
-                      <MapPin className="w-3.5 h-3.5 text-slate-400" />
-                      <span>{user.site_location || 'Headquarters'}</span>
-                    </div>
-
-                    <div className="relative inline-block">
-                      <select
-                        value={user.role || 'worker'}
-                        disabled={updatingRoleId === user.id}
-                        onChange={(e) => handleRoleChange(user.id, e.target.value)}
-                        className="text-[10px] font-extrabold px-2.5 py-1 rounded-lg uppercase border bg-indigo-50 border-indigo-200 text-indigo-700 appearance-none pr-6 cursor-pointer"
-                      >
-                        <option value="worker">Field Worker</option>
-                        <option value="site_clerk">Site Clerk</option>
-                        <option value="hr">HR Manager</option>
-                        <option value="accountant">Accountant</option>
-                        <option value="ceo">CEO</option>
-                        <option value="admin">Admin</option>
-                      </select>
-                      <ChevronDown className="w-3 h-3 absolute right-1.5 top-2 pointer-events-none text-indigo-500" />
-                    </div>
-                  </div>
-                </div>
-              ))
-            )}
-          </div>
-        </div>
+        </section>
       </main>
 
-      {/* Provision User Modal */}
-      {isProvisionModalOpen && (
-        <div className="fixed inset-0 z-50 bg-slate-900/40 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4 overflow-y-auto">
-          <div className="bg-white border border-slate-200 rounded-2xl w-full max-w-lg p-5 sm:p-6 space-y-4 sm:space-y-5 shadow-2xl relative my-8 max-h-[90vh] overflow-y-auto animate-in fade-in zoom-in duration-150">
-            <button
-              onClick={() => setIsProvisionModalOpen(false)}
-              className="absolute top-4 right-4 p-1.5 text-slate-400 hover:text-slate-700 rounded-lg hover:bg-slate-100 transition"
-            >
-              <X className="w-5 h-5" />
-            </button>
-
-            <div className="flex items-center gap-3 border-b border-slate-200 pb-4">
-              <div className="p-2.5 bg-indigo-50 border border-indigo-100 rounded-xl text-indigo-600 shrink-0">
-                <UserPlus className="w-5 h-5" />
-              </div>
+      {showCreateModal && (
+        <div className="fixed inset-0 z-50 bg-slate-950/50 backdrop-blur-sm p-4 flex items-center justify-center">
+          <div className="w-full max-w-lg rounded-2xl bg-white border border-slate-200 shadow-2xl">
+            <div className="p-5 sm:p-6 border-b border-slate-200 flex items-start justify-between gap-4">
               <div>
-                <h3 className="text-sm sm:text-base font-bold text-slate-900">Provision Employee Credentials</h3>
-                <p className="text-xs text-slate-500">Create login credentials and set system roles</p>
+                <h2 className="text-lg font-bold text-slate-950">Create System User</h2>
+                <p className="text-sm text-slate-500 mt-1">
+                  Create a login account. Site assignment is managed separately after sites are configured.
+                </p>
               </div>
+              <button
+                onClick={() => setShowCreateModal(false)}
+                className="p-2 rounded-lg hover:bg-slate-100 text-slate-500"
+                aria-label="Close modal"
+              >
+                <X className="h-5 w-5" />
+              </button>
             </div>
 
-            <form onSubmit={handleCreateUser} className="space-y-4 text-xs">
+            <form onSubmit={handleCreateUser} className="p-5 sm:p-6 space-y-4">
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-slate-700 font-semibold mb-1">First Name</label>
+                <Field label="First name">
                   <input
-                    type="text"
                     required
-                    value={formData.first_name}
-                    onChange={(e) => handleNameChange('first_name', e.target.value)}
-                    className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:border-indigo-600 focus:bg-white text-slate-900 transition"
-                    placeholder="e.g. Lorato"
+                    value={form.first_name}
+                    onChange={(event) => handleNameChange('first_name', event.target.value)}
+                    className="input-field"
+                    placeholder="Lorato"
                   />
-                </div>
-                <div>
-                  <label className="block text-slate-700 font-semibold mb-1">Last Name</label>
+                </Field>
+                <Field label="Last name">
                   <input
-                    type="text"
                     required
-                    value={formData.last_name}
-                    onChange={(e) => handleNameChange('last_name', e.target.value)}
-                    className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:border-indigo-600 focus:bg-white text-slate-900 transition"
-                    placeholder="e.g. Molefe"
+                    value={form.last_name}
+                    onChange={(event) => handleNameChange('last_name', event.target.value)}
+                    className="input-field"
+                    placeholder="Molefe"
                   />
-                </div>
+                </Field>
               </div>
 
-              {/* Email Generator Input */}
-              <div>
-                <label className="block text-slate-700 font-semibold mb-1">Company Email (Auto-Generated)</label>
+              <Field label="Company email">
                 <input
                   type="email"
                   required
-                  value={formData.email}
-                  onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-                  className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:border-indigo-600 focus:bg-white text-slate-900 transition font-mono text-[11px]"
+                  value={form.email}
+                  onChange={(event) => setForm((current) => ({ ...current, email: event.target.value }))}
+                  className="input-field"
                   placeholder="l.molefe@periscope.co.bw"
                 />
-              </div>
+              </Field>
 
-              {/* Password Generator Input */}
-              <div>
-                <div className="flex justify-between items-center mb-1">
-                  <label className="block text-slate-700 font-semibold">Temporary Password</label>
-                  <button
-                    type="button"
-                    onClick={generateRandomPassword}
-                    className="text-indigo-600 hover:text-indigo-700 text-[11px] font-bold flex items-center gap-1"
-                  >
-                    <Wand2 className="w-3 h-3" /> Auto-Generate
-                  </button>
-                </div>
-                <div className="relative">
+              <Field label="System role">
+                <select
+                  value={form.role}
+                  onChange={(event) => setForm((current) => ({ ...current, role: event.target.value }))}
+                  className="input-field"
+                >
+                  {SYSTEM_ROLES.map((role) => (
+                    <option key={role.value} value={role.value}>{role.label}</option>
+                  ))}
+                </select>
+              </Field>
+
+              <Field label="Temporary password">
+                <div className="flex gap-2">
                   <input
                     type="text"
                     required
-                    minLength={6}
-                    value={formData.password}
-                    onChange={(e) => setFormData({ ...formData, password: e.target.value })}
-                    className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:border-indigo-600 focus:bg-white text-slate-900 pr-9 transition font-mono text-xs"
-                    placeholder="••••••••"
+                    minLength={10}
+                    value={form.password}
+                    onChange={(event) => setForm((current) => ({ ...current, password: event.target.value }))}
+                    className="input-field flex-1 font-mono"
+                    placeholder="Minimum 10 characters"
                   />
-                  <Lock className="w-4 h-4 text-slate-400 absolute right-3 top-2.5 pointer-events-none" />
+                  <button
+                    type="button"
+                    onClick={generatePassword}
+                    className="px-3 rounded-xl border border-slate-200 bg-slate-50 text-xs font-bold hover:bg-slate-100"
+                  >
+                    Generate
+                  </button>
                 </div>
+              </Field>
+
+              <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800">
+                Give the temporary password to the user securely. Password reset/access controls will be added to this same module next.
               </div>
 
-              <div>
-                <label className="block text-slate-700 font-semibold mb-1">Assign Role Privilege</label>
-                <select
-                  value={formData.role}
-                  onChange={(e) => setFormData({ ...formData, role: e.target.value })}
-                  className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:border-indigo-600 focus:bg-white text-slate-900 transition font-medium"
-                >
-                  <option value="worker">Field Worker (General Staff)</option>
-                  <option value="site_clerk">Site Clerk (Shift Logger)</option>
-                  <option value="hr">HR Manager (Personnel)</option>
-                  <option value="accountant">Accountant (Disbursements)</option>
-                  <option value="ceo">CEO / Executive</option>
-                  <option value="admin">System Admin</option>
-                </select>
-              </div>
-
-              <div>
-                <label className="block text-slate-700 font-semibold mb-1">Assigned Jurisdiction / Location</label>
-                <input
-                  type="text"
-                  value={formData.site_location}
-                  onChange={(e) => setFormData({ ...formData, site_location: e.target.value })}
-                  className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:border-indigo-600 focus:bg-white text-slate-900 transition"
-                  placeholder="e.g. Headquarters / Debete Mine"
-                />
-              </div>
-
-              <div className="pt-2 flex items-center justify-end gap-3">
+              <div className="pt-2 flex justify-end gap-2">
                 <button
                   type="button"
-                  onClick={() => setIsProvisionModalOpen(false)}
-                  className="px-4 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold rounded-xl transition"
+                  onClick={() => setShowCreateModal(false)}
+                  className="px-4 py-2.5 rounded-xl border border-slate-200 text-sm font-semibold hover:bg-slate-50"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
                   disabled={submitting}
-                  className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold rounded-xl transition flex items-center gap-2 shadow-md shadow-indigo-600/20 disabled:opacity-50"
+                  className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-indigo-600 text-white text-sm font-semibold hover:bg-indigo-700 disabled:opacity-60"
                 >
-                  {submitting ? <RefreshCw className="w-4 h-4 animate-spin" /> : <UserPlus className="w-4 h-4" />}
-                  <span>Provision Identity</span>
+                  {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
+                  Create User
                 </button>
               </div>
             </form>
@@ -563,63 +393,45 @@ export default function UserProvisioningPage() {
         </div>
       )}
 
-      {/* Inspect Profile Modal */}
-      {selectedProfile && (
-        <div className="fixed inset-0 z-50 bg-slate-900/40 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4">
-          <div className="bg-white border border-slate-200 rounded-2xl w-full max-w-md p-5 sm:p-6 space-y-4 shadow-2xl relative animate-in fade-in zoom-in duration-150">
-            <button
-              onClick={() => setSelectedProfile(null)}
-              className="absolute top-4 right-4 p-1.5 text-slate-400 hover:text-slate-700 rounded-lg hover:bg-slate-100 transition"
-            >
-              <X className="w-5 h-5" />
-            </button>
-
-            <div className="flex items-center gap-3 border-b border-slate-200 pb-4">
-              <div className="p-3 bg-indigo-50 border border-indigo-100 rounded-2xl text-indigo-600">
-                <Users className="w-6 h-6" />
-              </div>
-              <div>
-                <h3 className="font-bold text-slate-900 text-sm sm:text-base">
-                  {selectedProfile.first_name || selectedProfile.last_name
-                    ? `${selectedProfile.first_name || ''} ${selectedProfile.last_name || ''}`.trim()
-                    : 'Unnamed Employee'}
-                </h3>
-                <span className="inline-block mt-0.5 text-[10px] font-extrabold uppercase px-2 py-0.5 rounded-md bg-indigo-50 text-indigo-700 border border-indigo-200">
-                  {selectedProfile.role || 'worker'}
-                </span>
-              </div>
-            </div>
-
-            <div className="space-y-3 text-xs text-slate-600">
-              <div className="flex items-center gap-2.5 p-2.5 bg-slate-50 rounded-xl">
-                <Mail className="w-4 h-4 text-slate-400 shrink-0" />
-                <span className="font-mono text-[11px] truncate">{selectedProfile.email}</span>
-              </div>
-
-              <div className="flex items-center gap-2.5 p-2.5 bg-slate-50 rounded-xl">
-                <MapPin className="w-4 h-4 text-slate-400 shrink-0" />
-                <span>{selectedProfile.site_location || 'Headquarters'}</span>
-              </div>
-
-              <div className="flex items-center gap-2.5 p-2.5 bg-slate-50 rounded-xl">
-                <Calendar className="w-4 h-4 text-slate-400 shrink-0" />
-                <span>
-                  Created: {selectedProfile.created_at ? new Date(selectedProfile.created_at).toLocaleString() : 'System Default'}
-                </span>
-              </div>
-            </div>
-
-            <div className="pt-2">
-              <button
-                onClick={() => setSelectedProfile(null)}
-                className="w-full py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold rounded-xl transition text-xs"
-              >
-                Close Details
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      <style jsx>{`
+        .input-field {
+          width: 100%;
+          border: 1px solid rgb(226 232 240);
+          background: rgb(248 250 252);
+          border-radius: 0.75rem;
+          padding: 0.65rem 0.75rem;
+          font-size: 0.875rem;
+          color: rgb(15 23 42);
+          outline: none;
+        }
+        .input-field:focus {
+          background: white;
+          border-color: rgb(99 102 241);
+        }
+      `}</style>
     </div>
+  );
+}
+
+function MetricCard({ title, value, icon: Icon }) {
+  return (
+    <div className="rounded-2xl border border-slate-200 bg-white p-4 sm:p-5 shadow-sm flex items-center justify-between gap-3">
+      <div>
+        <p className="text-[11px] sm:text-xs font-semibold uppercase tracking-wide text-slate-500">{title}</p>
+        <p className="text-2xl font-bold text-slate-950 mt-1">{value}</p>
+      </div>
+      <div className="p-2.5 rounded-xl bg-indigo-50 text-indigo-600 border border-indigo-100">
+        <Icon className="h-5 w-5" />
+      </div>
+    </div>
+  );
+}
+
+function Field({ label, children }) {
+  return (
+    <label className="block">
+      <span className="block text-xs font-semibold text-slate-700 mb-1.5">{label}</span>
+      {children}
+    </label>
   );
 }
