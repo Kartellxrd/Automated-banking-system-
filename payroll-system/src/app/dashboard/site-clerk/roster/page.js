@@ -1,534 +1,289 @@
 'use client';
 
-import { useState, useEffect, useCallback, Suspense } from 'react';
-import { useSearchParams, useRouter } from 'next/navigation';
-import Link from 'next/link';
-import { 
-  Building2, 
-  Lock, 
-  Unlock, 
-  Clock, 
-  AlertCircle, 
-  Edit3, 
-  CheckCircle2, 
-  ArrowLeft, 
-  Search, 
-  ShieldCheck,
-  Send,
-  Loader2,
+import { Suspense, useCallback, useEffect, useMemo, useState } from 'react';
+import { useSearchParams } from 'next/navigation';
+import {
+  AlertCircle,
   Calendar,
-  MapPin
+  CheckCircle2,
+  Clock3,
+  Edit3,
+  Loader2,
+  Lock,
+  Search,
+  Send,
+  UserCheck,
+  X,
 } from 'lucide-react';
 import SiteClerkSideNav from '@/components/site-clerk/SiteClerkSideNav';
 import SiteClerkNavbar from '@/components/site-clerk/SiteClerkNavbar';
 
-function RosterLockContent() {
-  const router = useRouter();
+const STATUS_LABELS = {
+  draft: 'Draft',
+  submitted_to_hr: 'Submitted to HR',
+  approved: 'Approved by HR',
+  rejected: 'Rejected by HR',
+};
+
+const STATE_LABELS = {
+  present: 'Present',
+  absent: 'Absent',
+  leave: 'On Leave',
+  sick: 'Sick',
+};
+
+function todayInBotswana() {
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Africa/Gaborone',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(new Date());
+}
+
+function timeValue(value) {
+  if (!value) return '';
+  return new Intl.DateTimeFormat('en-GB', {
+    timeZone: 'Africa/Gaborone',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  }).format(new Date(value));
+}
+
+function DailyRosterContent() {
   const searchParams = useSearchParams();
-  const initialSiteParam = searchParams.get('site') || '';
+  const initialDate = searchParams.get('date') || todayInBotswana();
+  const [date, setDate] = useState(initialDate);
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [search, setSearch] = useState('');
+  const [message, setMessage] = useState({ type: '', text: '' });
+  const [editing, setEditing] = useState(null);
+  const [form, setForm] = useState({ attendance_state: 'present', clock_in: '07:00', clock_out: '16:00', overtime_hours: '0', notes: '' });
 
-  // Dynamic Site State (Fetched from API)
-  const [sites, setSites] = useState([]);
-  const [sitesLoading, setSitesLoading] = useState(true);
-  const [selectedSite, setSelectedSite] = useState(initialSiteParam);
-  const [shiftDate, setShiftDate] = useState('2026-08-24');
-
-  const [roster, setRoster] = useState([]);
-  const [isLoading, setIsLoading] = useState(true);
-  const [isLocked, setIsLocked] = useState(false);
-  const [isSubmitting, setIsSubmitting] = useState(false);
-  const [searchQuery, setSearchQuery] = useState('');
-
-  // Modal state for editing shift variances
-  const [editingWorker, setEditingWorker] = useState(null);
-  const [varianceHours, setVarianceHours] = useState('');
-  const [varianceReason, setVarianceReason] = useState('');
-
-  // 1. Fetch Dynamic Sites List from API
-  useEffect(() => {
-    async function fetchSites() {
-      try {
-        setSitesLoading(true);
-        const res = await fetch('/api/site-clerk/dashboard');
-        const data = await res.json();
-
-        if (res.ok && data.sites?.length > 0) {
-          setSites(data.sites);
-          if (!initialSiteParam) {
-            const defaultSite = data.selectedSite || data.sites[0].name;
-            setSelectedSite(defaultSite);
-          }
-        } else {
-          console.error('Failed to load sites:', data.error);
-        }
-      } catch (err) {
-        console.error('Error fetching sites:', err);
-      } finally {
-        setSitesLoading(false);
-      }
-    }
-
-    fetchSites();
-  }, [initialSiteParam]);
-
-  // Sync site change with URL parameters
-  const handleSiteChange = (newSite) => {
-    setSelectedSite(newSite);
-    router.replace(`?site=${encodeURIComponent(newSite)}`);
-  };
-
-  // 2. Fetch Employees and Timecards via API route
-  const loadSiteRoster = useCallback(async () => {
-    if (!selectedSite) return;
-
-    setIsLoading(true);
+  const loadRoster = useCallback(async () => {
+    setLoading(true);
+    setMessage({ type: '', text: '' });
     try {
-      const res = await fetch(
-        `/api/site-clerk/roster?site=${encodeURIComponent(selectedSite)}&date=${shiftDate}`
-      );
-      const data = await res.json();
-
-      if (!res.ok) throw new Error(data.error || 'Failed to fetch roster');
-
-      setIsLocked(data.isLocked || false);
-
-      const dbEmployees = data.employees || [];
-      const dbAttendance = data.attendance || [];
-
-      const formattedRoster = dbEmployees.map((emp) => {
-        const att = dbAttendance.find((a) => a.employee_id === emp.id);
-
-        return {
-          id: emp.id,
-          attendance_id: att?.id || null,
-          code: emp.employee_code || `EMP-${emp.id}`,
-          name: `${emp.first_name} ${emp.last_name}`,
-          role: emp.job_title || 'General Worker',
-          clockIn: att?.clock_in || '07:00 AM',
-          clockOut: att?.clock_out || '04:00 PM',
-          regHours: att?.regular_hours ?? 8,
-          otHours: att?.overtime_hours ?? 0,
-          status: att?.status || (att ? 'Verified' : 'Pending Entry'),
-          auditNote: att?.audit_note || '',
-        };
-      });
-
-      setRoster(formattedRoster);
-    } catch (err) {
-      console.error('Error fetching site roster:', err);
+      const response = await fetch(`/api/site-clerk/roster?date=${encodeURIComponent(date)}`, { cache: 'no-store' });
+      const result = await response.json();
+      if (!response.ok || !result.success) throw new Error(result.error || 'Could not load roster.');
+      setData(result.data);
+    } catch (error) {
+      setData(null);
+      setMessage({ type: 'error', text: error.message });
     } finally {
-      setIsLoading(false);
+      setLoading(false);
     }
-  }, [selectedSite, shiftDate]);
+  }, [date]);
 
-  useEffect(() => {
-    loadSiteRoster();
-  }, [loadSiteRoster]);
+  useEffect(() => { loadRoster(); }, [loadRoster]);
 
-  // 3. Save variance adjustments via PATCH API
-  const handleSaveVariance = async (e) => {
-    e.preventDefault();
-    if (!editingWorker || !varianceReason.trim()) return;
+  const workers = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    return (data?.workers || []).filter((worker) => {
+      const text = `${worker.first_name || ''} ${worker.last_name || ''} ${worker.employee_code || ''} ${worker.job_role || ''}`.toLowerCase();
+      return !q || text.includes(q);
+    });
+  }, [data, search]);
 
-    const newOtHours = parseFloat(varianceHours) || 0;
+  function openEntry(worker) {
+    const entry = worker.attendance;
+    setEditing(worker);
+    setForm({
+      attendance_state: entry?.attendance_state || 'present',
+      clock_in: timeValue(entry?.clock_in) || '07:00',
+      clock_out: timeValue(entry?.clock_out) || '16:00',
+      overtime_hours: String(entry?.overtime_hours ?? 0),
+      notes: entry?.supervisor_notes || '',
+    });
+  }
 
+  async function saveEntry(event) {
+    event.preventDefault();
+    if (!editing) return;
+    setSaving(true);
+    setMessage({ type: '', text: '' });
     try {
-      const res = await fetch('/api/site-clerk/roster', {
+      const response = await fetch('/api/site-clerk/roster', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          attendanceId: editingWorker.attendance_id,
-          employeeId: editingWorker.id,
-          site: selectedSite,
-          date: shiftDate,
-          clockIn: editingWorker.clockIn,
-          clockOut: editingWorker.clockOut,
-          regHours: editingWorker.regHours,
-          otHours: newOtHours,
-          auditNote: varianceReason,
+          employee_id: editing.id,
+          date,
+          attendance_state: form.attendance_state,
+          clock_in: form.attendance_state === 'present' ? form.clock_in : null,
+          clock_out: form.attendance_state === 'present' ? form.clock_out : null,
+          overtime_hours: form.attendance_state === 'present' ? Number(form.overtime_hours || 0) : 0,
+          notes: form.notes,
         }),
       });
-
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Failed to update variance');
-
-      setRoster((prev) =>
-        prev.map((worker) => {
-          if (worker.id === editingWorker.id) {
-            return {
-              ...worker,
-              attendance_id: data.attendance?.id || worker.attendance_id,
-              otHours: newOtHours,
-              status: 'Adjusted & Verified',
-              auditNote: varianceReason,
-            };
-          }
-          return worker;
-        })
-      );
-
-      setEditingWorker(null);
-      setVarianceHours('');
-      setVarianceReason('');
-    } catch (err) {
-      console.error('Failed to update variance:', err);
-      alert(err.message || 'Failed to save variance entry to database.');
+      const result = await response.json();
+      if (!response.ok || !result.success) throw new Error(result.error || 'Could not save attendance.');
+      setEditing(null);
+      setMessage({ type: 'success', text: `${editing.first_name} ${editing.last_name} attendance saved.` });
+      await loadRoster();
+    } catch (error) {
+      setMessage({ type: 'error', text: error.message });
+    } finally {
+      setSaving(false);
     }
-  };
+  }
 
-  // 4. Lock Roster & Submit to HR via POST API
-  const handleLockAndSubmit = async () => {
-    if (
-      !confirm(
-        `Are you sure you want to lock and submit all shift entries for ${selectedSite} on ${shiftDate} to HR? This action freezes timecards for payroll.`
-      )
-    ) {
-      return;
-    }
+  async function submitRoster() {
+    if (!data?.canSubmit) return;
+    if (!window.confirm(`Submit the completed ${data.site.site_name} roster for ${date} to HR? You will not be able to edit it unless HR rejects it.`)) return;
 
-    setIsSubmitting(true);
+    setSubmitting(true);
+    setMessage({ type: '', text: '' });
     try {
-      const res = await fetch('/api/site-clerk/roster', {
+      const response = await fetch('/api/site-clerk/roster', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          site: selectedSite,
-          date: shiftDate,
-        }),
+        body: JSON.stringify({ date }),
       });
-
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Failed to lock shift');
-
-      setIsLocked(true);
-    } catch (err) {
-      console.error('Failed to lock shift roster:', err);
-      alert(err.message || 'Could not lock shift roster. Please try again.');
+      const result = await response.json();
+      if (!response.ok || !result.success) throw new Error(result.error || 'Could not submit roster.');
+      setMessage({ type: 'success', text: result.message });
+      await loadRoster();
+    } catch (error) {
+      setMessage({ type: 'error', text: error.message });
     } finally {
-      setIsSubmitting(false);
+      setSubmitting(false);
     }
-  };
+  }
 
-  const filteredRoster = roster.filter(
-    (w) =>
-      w.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      w.code.toLowerCase().includes(searchQuery.toLowerCase())
-  );
+  const status = data?.roster?.status || 'draft';
+  const locked = data ? !data.canEdit : true;
 
   return (
     <div className="min-h-screen bg-slate-100 text-slate-900 flex flex-col lg:flex-row font-sans">
       <SiteClerkSideNav />
-
       <main className="flex-1 p-4 sm:p-6 lg:p-8 space-y-6 overflow-x-hidden">
-        <SiteClerkNavbar title="Shift Log & Roster Lock" siteName={selectedSite || 'Loading...'} />
+        <SiteClerkNavbar title="Daily Attendance & Roster" siteName={data?.site?.site_name || 'Assigned Site'} />
 
-        {/* Back Link, Date Selector & Dynamic Site Switcher */}
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white p-4 sm:p-5 rounded-2xl border border-slate-200 shadow-xs">
-          <Link
-            href="/dashboard/site-clerk"
-            className="inline-flex items-center gap-2 text-xs font-bold text-slate-600 hover:text-indigo-600 transition"
-          >
-            <ArrowLeft className="w-4 h-4" /> Back to Dashboard
-          </Link>
+        {message.text && (
+          <div className={`rounded-2xl border px-4 py-3 text-sm font-semibold flex items-center justify-between gap-3 ${message.type === 'success' ? 'border-emerald-200 bg-emerald-50 text-emerald-800' : 'border-rose-200 bg-rose-50 text-rose-800'}`}>
+            <div className="flex items-center gap-2">{message.type === 'success' ? <CheckCircle2 className="w-4 h-4" /> : <AlertCircle className="w-4 h-4" />}{message.text}</div>
+            <button onClick={() => setMessage({ type: '', text: '' })}><X className="w-4 h-4" /></button>
+          </div>
+        )}
 
+        <section className="rounded-2xl border border-slate-200 bg-white p-4 sm:p-5 flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+          <div>
+            <div className="text-xs font-bold uppercase tracking-wider text-slate-400">Assigned Site</div>
+            <div className="mt-1 text-lg font-black text-slate-950">{data?.site?.site_name || 'Loading...'}</div>
+            <div className="text-sm text-slate-500">{data?.site?.location || ''}</div>
+          </div>
           <div className="flex flex-wrap items-center gap-3">
-            <div className="flex items-center gap-2 bg-slate-50 border border-slate-200 rounded-xl px-3 py-1.5">
+            <div className="flex items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
               <Calendar className="w-4 h-4 text-slate-400" />
-              <input
-                type="date"
-                value={shiftDate}
-                onChange={(e) => setShiftDate(e.target.value)}
-                className="bg-transparent text-xs font-bold text-slate-700 outline-none cursor-pointer"
-              />
+              <input type="date" max={todayInBotswana()} value={date} onChange={(e) => setDate(e.target.value)} className="bg-transparent text-xs font-bold outline-none" />
             </div>
-
-            <div className="flex items-center gap-2">
-              <span className="text-xs font-semibold text-slate-500">Target Station:</span>
-              {sitesLoading ? (
-                <div className="flex items-center gap-2 text-xs text-slate-500 bg-slate-50 border border-slate-200 rounded-xl px-3 py-1.5">
-                  <Loader2 className="w-3.5 h-3.5 animate-spin text-indigo-600" />
-                  <span>Loading...</span>
-                </div>
-              ) : (
-                <select
-                  value={selectedSite}
-                  onChange={(e) => handleSiteChange(e.target.value)}
-                  className="bg-slate-900 text-white text-xs font-bold rounded-xl px-3 py-2 outline-none cursor-pointer focus:ring-2 focus:ring-indigo-500"
-                >
-                  {sites.map((site) => (
-                    <option key={site.id || site.name} value={site.name}>
-                      {site.name}
-                    </option>
-                  ))}
-                </select>
-              )}
-            </div>
+            <span className={`rounded-full px-3 py-1.5 text-xs font-bold ${status === 'approved' ? 'bg-emerald-50 text-emerald-700' : status === 'rejected' ? 'bg-rose-50 text-rose-700' : status === 'submitted_to_hr' ? 'bg-indigo-50 text-indigo-700' : 'bg-amber-50 text-amber-700'}`}>
+              {STATUS_LABELS[status] || status}
+            </span>
           </div>
-        </div>
+        </section>
 
-        {/* HR Lock Action Banner */}
-        <div
-          className={`rounded-3xl p-5 sm:p-6 shadow-md transition-all border ${
-            isLocked
-              ? 'bg-slate-900 border-slate-800 text-white'
-              : 'bg-gradient-to-r from-amber-500 to-amber-600 border-amber-400 text-slate-950'
-          }`}
-        >
-          <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
-            <div className="flex items-center gap-3.5">
-              <div
-                className={`p-3 rounded-2xl shrink-0 ${
-                  isLocked
-                    ? 'bg-emerald-500/20 border border-emerald-500/40 text-emerald-400'
-                    : 'bg-slate-950/20 text-slate-950'
-                }`}
-              >
-                {isLocked ? <Lock className="w-6 h-6" /> : <Unlock className="w-6 h-6" />}
-              </div>
-              <div>
-                <div className="flex items-center gap-2">
-                  <span className="text-xs font-extrabold uppercase tracking-wider opacity-80">
-                    Shift Processing Status
-                  </span>
-                  <span
-                    className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${
-                      isLocked
-                        ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40'
-                        : 'bg-slate-950/10 text-slate-950 border-slate-950/20'
-                    }`}
-                  >
-                    {isLocked ? 'LOCKED & SUBMITTED' : 'OPEN FOR EDITS'}
-                  </span>
-                </div>
-                <h3 className="text-lg sm:text-xl font-black mt-0.5">
-                  {isLocked
-                    ? `${selectedSite} shift entries for ${shiftDate} are locked and submitted to HR compliance.`
-                    : `Finalize shift logs and submit ${selectedSite} hours for ${shiftDate} to HR.`}
-                </h3>
-              </div>
-            </div>
-
-            {!isLocked && (
-              <button
-                disabled={isSubmitting}
-                onClick={handleLockAndSubmit}
-                className="w-full md:w-auto px-6 py-3 bg-slate-950 hover:bg-slate-900 text-white font-black text-xs uppercase tracking-wider rounded-xl shadow-lg transition flex items-center justify-center gap-2 cursor-pointer active:scale-95 shrink-0 disabled:opacity-50"
-              >
-                {isSubmitting ? (
-                  <Loader2 className="w-4 h-4 animate-spin text-amber-400" />
-                ) : (
-                  <Send className="w-4 h-4 text-emerald-400" />
-                )}
-                Submit Shift Roster to HR
-              </button>
-            )}
+        {data?.roster?.status === 'rejected' && (
+          <div className="rounded-2xl border border-rose-200 bg-rose-50 p-4">
+            <div className="font-bold text-rose-800">HR rejected this roster. It is editable again.</div>
+            <div className="mt-1 text-sm text-rose-700">{data.roster.rejection_reason || 'Correct the attendance entries and resubmit.'}</div>
           </div>
-        </div>
+        )}
 
-        {/* Daily Attendance Table Section */}
-        <div className="bg-white rounded-3xl border border-slate-200 shadow-xs overflow-hidden">
-          <div className="p-4 sm:p-5 border-b border-slate-100 flex flex-col sm:flex-row items-center justify-between gap-4">
+        <section className="grid grid-cols-3 gap-3">
+          <MiniMetric label="Assigned" value={data?.workers?.length || 0} />
+          <MiniMetric label="Entered" value={data?.enteredWorkers || 0} />
+          <MiniMetric label="Missing" value={data?.missingEntries || 0} warn={(data?.missingEntries || 0) > 0} />
+        </section>
+
+        <section className="rounded-3xl border border-slate-200 bg-white shadow-sm overflow-hidden">
+          <div className="p-5 border-b border-slate-200 flex flex-col md:flex-row md:items-center justify-between gap-4">
             <div>
-              <h4 className="text-base font-extrabold text-slate-900">Daily Attendance Log</h4>
-              <p className="text-xs text-slate-500 mt-0.5">
-                Active shift records and calculated hours for {selectedSite} ({shiftDate})
-              </p>
+              <h2 className="font-black text-slate-950">Worker Attendance</h2>
+              <p className="mt-1 text-xs text-slate-500">Regular hours are calculated automatically as worked hours minus manual overtime.</p>
             </div>
-
-            <div className="relative w-full sm:w-64">
-              <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
-              <input
-                type="text"
-                placeholder="Search worker or ID..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                className="w-full bg-slate-50 border border-slate-200 text-xs rounded-xl pl-9 pr-3 py-2 outline-none focus:ring-2 focus:ring-indigo-500"
-              />
-            </div>
+            <div className="relative w-full md:w-72"><Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" /><input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search worker..." className="w-full rounded-xl border border-slate-200 bg-slate-50 py-2.5 pl-9 pr-3 text-xs outline-none focus:border-indigo-500" /></div>
           </div>
 
           <div className="overflow-x-auto">
-            <table className="w-full text-left border-collapse">
-              <thead>
-                <tr className="bg-slate-50/80 text-slate-500 text-[11px] font-bold uppercase tracking-wider border-b border-slate-200/80">
-                  <th className="py-3.5 px-4">Employee</th>
-                  <th className="py-3.5 px-4">Clock In / Out</th>
-                  <th className="py-3.5 px-4 text-center">Reg. Hours</th>
-                  <th className="py-3.5 px-4 text-center">Overtime</th>
-                  <th className="py-3.5 px-4">Status</th>
-                  <th className="py-3.5 px-4 text-right">Action</th>
-                </tr>
+            <table className="w-full min-w-[950px] text-xs">
+              <thead className="bg-slate-50 border-b border-slate-200 text-slate-500 uppercase tracking-wider">
+                <tr><th className="px-5 py-3 text-left">Worker</th><th className="px-4 py-3 text-left">Attendance</th><th className="px-4 py-3 text-left">Clock In / Out</th><th className="px-4 py-3 text-center">Regular</th><th className="px-4 py-3 text-center">OT</th><th className="px-4 py-3 text-center">Worked</th><th className="px-5 py-3 text-right">Action</th></tr>
               </thead>
-              <tbody className="divide-y divide-slate-100 text-xs">
-                {isLoading ? (
-                  <tr>
-                    <td colSpan={6} className="py-8 text-center text-slate-400">
-                      <div className="flex justify-center items-center gap-2">
-                        <Loader2 className="w-5 h-5 animate-spin text-indigo-600" />
-                        <span>Loading {selectedSite} roster...</span>
-                      </div>
-                    </td>
-                  </tr>
-                ) : filteredRoster.length === 0 ? (
-                  <tr>
-                    <td colSpan={6} className="py-8 text-center text-slate-400 font-medium">
-                      No personnel records found for {selectedSite}.
-                    </td>
-                  </tr>
-                ) : (
-                  filteredRoster.map((worker) => (
-                    <tr key={worker.id} className="hover:bg-slate-50/50 transition">
-                      <td className="py-3.5 px-4">
-                        <div className="font-extrabold text-slate-900">{worker.name}</div>
-                        <div className="text-[10px] text-slate-400 font-mono">
-                          {worker.code} • {worker.role}
-                        </div>
-                      </td>
-                      <td className="py-3.5 px-4">
-                        <div className="font-semibold text-slate-800">
-                          {worker.clockIn} - {worker.clockOut}
-                        </div>
-                      </td>
-                      <td className="py-3.5 px-4 text-center font-bold text-slate-700">
-                        {worker.regHours}h
-                      </td>
-                      <td className="py-3.5 px-4 text-center font-bold text-amber-600">
-                        +{worker.otHours}h
-                      </td>
-                      <td className="py-3.5 px-4">
-                        <span
-                          className={`inline-flex items-center gap-1 text-[10px] font-bold px-2.5 py-1 rounded-full border ${
-                            worker.status.includes('Verified')
-                              ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
-                              : 'bg-amber-50 text-amber-700 border-amber-200'
-                          }`}
-                        >
-                          {worker.status.includes('Verified') ? (
-                            <CheckCircle2 className="w-3 h-3" />
-                          ) : (
-                            <AlertCircle className="w-3 h-3" />
-                          )}
-                          {worker.status}
-                        </span>
-                      </td>
-                      <td className="py-3.5 px-4 text-right">
-                        <button
-                          disabled={isLocked}
-                          onClick={() => {
-                            setEditingWorker(worker);
-                            setVarianceHours(worker.otHours.toString());
-                            setVarianceReason(worker.auditNote || '');
-                          }}
-                          className={`inline-flex items-center gap-1 px-3 py-1.5 rounded-lg font-bold text-[11px] transition ${
-                            isLocked
-                              ? 'bg-slate-100 text-slate-400 cursor-not-allowed'
-                              : 'bg-indigo-50 hover:bg-indigo-100 text-indigo-700 cursor-pointer'
-                          }`}
-                        >
-                          <Edit3 className="w-3.5 h-3.5" /> Adjust
-                        </button>
-                      </td>
+              <tbody className="divide-y divide-slate-100">
+                {loading ? (
+                  <tr><td colSpan={7} className="py-16 text-center text-slate-500"><Loader2 className="inline w-5 h-5 animate-spin mr-2 text-indigo-600" />Loading roster...</td></tr>
+                ) : workers.length === 0 ? (
+                  <tr><td colSpan={7} className="py-16 text-center text-slate-500">No active workers are assigned to this site for this roster.</td></tr>
+                ) : workers.map((worker) => {
+                  const entry = worker.attendance;
+                  const state = entry?.attendance_state;
+                  return (
+                    <tr key={worker.id} className="hover:bg-slate-50/70">
+                      <td className="px-5 py-4"><div className="font-bold text-slate-900">{worker.first_name} {worker.last_name}</div><div className="text-[10px] text-slate-400 mt-0.5">{worker.employee_code || 'No employee code'} • {worker.job_role || 'Unassigned role'}</div></td>
+                      <td className="px-4 py-4">{entry ? <span className={`rounded-full px-2.5 py-1 font-bold ${state === 'present' ? 'bg-emerald-50 text-emerald-700' : state === 'absent' ? 'bg-rose-50 text-rose-700' : 'bg-amber-50 text-amber-700'}`}>{STATE_LABELS[state] || state}</span> : <span className="text-amber-600 font-bold">Not entered</span>}</td>
+                      <td className="px-4 py-4 font-semibold text-slate-700">{state === 'present' ? `${timeValue(entry?.clock_in)} – ${timeValue(entry?.clock_out)}` : entry ? '—' : 'Not recorded'}</td>
+                      <td className="px-4 py-4 text-center font-bold">{entry ? Number(entry.regular_hours || 0).toFixed(2) : '—'}</td>
+                      <td className="px-4 py-4 text-center font-bold text-indigo-700">{entry ? Number(entry.overtime_hours || 0).toFixed(2) : '—'}</td>
+                      <td className="px-4 py-4 text-center font-black">{entry ? `${Number(entry.worked_hours || 0).toFixed(2)}h` : '—'}</td>
+                      <td className="px-5 py-4 text-right"><button disabled={locked} onClick={() => openEntry(worker)} className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 font-bold text-slate-700 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed"><Edit3 className="w-3.5 h-3.5" />{entry ? 'Edit' : 'Record'}</button></td>
                     </tr>
-                  ))
-                )}
+                  );
+                })}
               </tbody>
             </table>
           </div>
-        </div>
+        </section>
 
-        {/* Variance & Overtime Modal Drawer */}
-        {editingWorker && (
-          <div className="fixed inset-0 bg-slate-950/60 backdrop-blur-xs flex items-center justify-center p-4 z-50">
-            <div className="bg-white rounded-3xl max-w-md w-full p-6 space-y-5 border border-slate-200 shadow-2xl animate-in fade-in zoom-in-95 duration-150">
-              <div className="flex items-center justify-between border-b border-slate-100 pb-3">
-                <div className="flex items-center gap-2">
-                  <Clock className="w-5 h-5 text-indigo-600" />
-                  <h4 className="text-base font-extrabold text-slate-900">Shift Variance Adjustment</h4>
-                </div>
-                <button
-                  onClick={() => setEditingWorker(null)}
-                  className="text-slate-400 hover:text-slate-600 font-bold text-xs"
-                >
-                  ✕
-                </button>
-              </div>
-
-              <form onSubmit={handleSaveVariance} className="space-y-4">
-                <div className="bg-slate-50 p-3 rounded-2xl border border-slate-200 text-xs">
-                  <div className="font-extrabold text-slate-900">
-                    {editingWorker.name} ({editingWorker.code})
-                  </div>
-                  <div className="text-slate-500">
-                    {editingWorker.role} • {selectedSite}
-                  </div>
-                </div>
-
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">
-                    Overtime Hours Adjustment
-                  </label>
-                  <input
-                    type="number"
-                    step="0.25"
-                    min="0"
-                    max="12"
-                    value={varianceHours}
-                    onChange={(e) => setVarianceHours(e.target.value)}
-                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-bold outline-none focus:ring-2 focus:ring-indigo-500"
-                    placeholder="e.g. 1.5"
-                    required
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">
-                    Mandatory Audit Note / Variance Reason
-                  </label>
-                  <textarea
-                    rows={3}
-                    value={varianceReason}
-                    onChange={(e) => setVarianceReason(e.target.value)}
-                    className="w-full bg-slate-50 border border-slate-200 rounded-xl p-3 text-xs outline-none focus:ring-2 focus:ring-indigo-500"
-                    placeholder="Provide reason for adjustment..."
-                    required
-                  />
-                </div>
-
-                <div className="flex justify-end gap-2 pt-2">
-                  <button
-                    type="button"
-                    onClick={() => setEditingWorker(null)}
-                    className="px-4 py-2 bg-slate-100 text-slate-700 font-bold text-xs rounded-xl hover:bg-slate-200 transition"
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    type="submit"
-                    className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs rounded-xl shadow-xs transition"
-                  >
-                    Save Variance Entry
-                  </button>
-                </div>
-              </form>
+        <section className={`rounded-2xl border p-5 flex flex-col md:flex-row md:items-center justify-between gap-4 ${locked ? 'border-slate-200 bg-slate-200/60' : data?.canSubmit ? 'border-emerald-200 bg-emerald-50' : 'border-amber-200 bg-amber-50'}`}>
+          <div className="flex items-start gap-3">
+            <div className="mt-0.5">{locked ? <Lock className="w-5 h-5 text-slate-500" /> : data?.canSubmit ? <UserCheck className="w-5 h-5 text-emerald-600" /> : <Clock3 className="w-5 h-5 text-amber-600" />}</div>
+            <div>
+              <div className="font-black text-slate-900">{locked ? 'Roster locked' : data?.canSubmit ? 'Roster ready for HR' : 'Complete all worker entries'}</div>
+              <div className="mt-1 text-xs text-slate-600">{locked ? `Current status: ${STATUS_LABELS[status] || status}.` : data?.canSubmit ? 'Submitting locks this roster until HR approves or rejects it.' : `${data?.missingEntries || 0} worker attendance entr${data?.missingEntries === 1 ? 'y is' : 'ies are'} still missing.`}</div>
             </div>
           </div>
-        )}
+          {!locked && <button onClick={submitRoster} disabled={!data?.canSubmit || submitting} className="inline-flex items-center justify-center gap-2 rounded-xl bg-slate-950 px-5 py-3 text-xs font-black uppercase tracking-wider text-white disabled:opacity-40"><Send className="w-4 h-4" />{submitting ? 'Submitting...' : 'Submit Roster to HR'}</button>}
+        </section>
       </main>
+
+      {editing && (
+        <div className="fixed inset-0 z-50 bg-slate-950/50 backdrop-blur-sm p-4 flex items-center justify-center">
+          <div className="w-full max-w-lg rounded-3xl border border-slate-200 bg-white shadow-2xl">
+            <div className="p-5 border-b border-slate-200 flex items-start justify-between gap-4"><div><h3 className="text-lg font-black text-slate-950">Record Attendance</h3><p className="text-sm text-slate-500 mt-1">{editing.first_name} {editing.last_name} • {date}</p></div><button onClick={() => !saving && setEditing(null)} className="p-2 rounded-xl hover:bg-slate-100"><X className="w-5 h-5" /></button></div>
+            <form onSubmit={saveEntry} className="p-5 space-y-4">
+              <label className="block"><span className="block text-xs font-bold text-slate-700 mb-1.5">Attendance status</span><select value={form.attendance_state} onChange={(e) => setForm((f) => ({ ...f, attendance_state: e.target.value }))} className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm outline-none"><option value="present">Present</option><option value="absent">Absent</option><option value="leave">On Leave</option><option value="sick">Sick</option></select></label>
+
+              {form.attendance_state === 'present' && (
+                <>
+                  <div className="grid grid-cols-2 gap-3">
+                    <label><span className="block text-xs font-bold text-slate-700 mb-1.5">Clock in</span><input type="time" required value={form.clock_in} onChange={(e) => setForm((f) => ({ ...f, clock_in: e.target.value }))} className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm" /></label>
+                    <label><span className="block text-xs font-bold text-slate-700 mb-1.5">Clock out</span><input type="time" required value={form.clock_out} onChange={(e) => setForm((f) => ({ ...f, clock_out: e.target.value }))} className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm" /></label>
+                  </div>
+                  <label className="block"><span className="block text-xs font-bold text-slate-700 mb-1.5">Manual overtime hours</span><input type="number" min="0" step="0.25" value={form.overtime_hours} onChange={(e) => setForm((f) => ({ ...f, overtime_hours: e.target.value }))} className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm" /><span className="mt-1 block text-[11px] text-slate-400">The system calculates worked hours from clock-in/out and subtracts OT to get regular hours.</span></label>
+                </>
+              )}
+
+              <label className="block"><span className="block text-xs font-bold text-slate-700 mb-1.5">Note / reason</span><textarea rows={3} value={form.notes} onChange={(e) => setForm((f) => ({ ...f, notes: e.target.value }))} placeholder={form.attendance_state === 'present' ? 'Optional attendance note' : 'Reason or supporting note'} className="w-full resize-none rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm outline-none" /></label>
+              <div className="pt-2 flex justify-end gap-2"><button type="button" disabled={saving} onClick={() => setEditing(null)} className="rounded-xl border border-slate-200 px-4 py-2.5 text-xs font-bold">Cancel</button><button type="submit" disabled={saving} className="rounded-xl bg-indigo-600 px-5 py-2.5 text-xs font-bold text-white disabled:opacity-50">{saving ? 'Saving...' : 'Save Attendance'}</button></div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
 
-export default function SiteClerkRosterPage() {
-  return (
-    <Suspense
-      fallback={
-        <div className="min-h-screen flex justify-center items-center bg-slate-100 text-xs text-slate-400 font-bold">
-          <Loader2 className="w-5 h-5 animate-spin text-indigo-600 mr-2" />
-          Loading Roster Page...
-        </div>
-      }
-    >
-      <RosterLockContent />
-    </Suspense>
-  );
+function MiniMetric({ label, value, warn = false }) {
+  return <div className="rounded-2xl border border-slate-200 bg-white p-4"><div className="text-[10px] font-bold uppercase tracking-wider text-slate-400">{label}</div><div className={`mt-1 text-2xl font-black ${warn ? 'text-amber-700' : 'text-slate-950'}`}>{value}</div></div>;
+}
+
+export default function DailyRosterPage() {
+  return <Suspense fallback={<div className="min-h-screen bg-slate-100" />}><DailyRosterContent /></Suspense>;
 }
