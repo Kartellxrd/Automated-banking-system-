@@ -146,8 +146,12 @@ function matchWorker(row, employees, usedEmployeeIds) {
   }
 
   usedEmployeeIds.add(candidate.id);
-  const status = method === 'fuzzy_name' ? 'review' : 'matched';
-  return { employee: candidate, method, confidence, status };
+  return {
+    employee: candidate,
+    method,
+    confidence,
+    status: method === 'fuzzy_name' ? 'review' : 'matched',
+  };
 }
 
 async function extractWithGemini(buffer, mimeType) {
@@ -157,8 +161,8 @@ async function extractWithGemini(buffer, mimeType) {
 
   const modelNames = [
     process.env.GEMINI_MODEL,
+    'gemini-3.6-flash',
     'gemini-2.5-flash',
-    'gemini-2.0-flash',
   ].filter(Boolean);
 
   const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
@@ -213,6 +217,7 @@ export async function POST(request) {
 
   const db = createSupabaseAdminClient();
   let uploadedPath = null;
+  let uploadRecordId = null;
 
   try {
     const formData = await request.formData();
@@ -272,9 +277,9 @@ export async function POST(request) {
 
     const arrayBuffer = await file.arrayBuffer();
     const buffer = Buffer.from(arrayBuffer);
-    const uploadId = randomUUID();
+    uploadRecordId = randomUUID();
     const extension = mimeExtension(file.type);
-    uploadedPath = `${context.site.id}/${date}/${roster.id}/${uploadId}.${extension}`;
+    uploadedPath = `${context.site.id}/${date}/${roster.id}/${uploadRecordId}.${extension}`;
     const hash = createHash('sha256').update(buffer).digest('hex');
 
     const { error: storageError } = await db.storage
@@ -285,7 +290,7 @@ export async function POST(request) {
     const { error: uploadRecordError } = await db
       .from('timesheet_uploads')
       .insert({
-        id: uploadId,
+        id: uploadRecordId,
         roster_id: roster.id,
         storage_bucket: BUCKET,
         storage_path: uploadedPath,
@@ -316,8 +321,8 @@ export async function POST(request) {
     const stagedRows = extractionRows.map((row, index) => {
       const matched = matchWorker(row, employees, usedEmployeeIds);
       return {
-        upload_id: uploadId,
-        source_row_number: Number.isInteger(Number(row.rowNumber)) && Number(row.rowNumber) > 0 ? Number(row.rowNumber) : index + 1,
+        upload_id: uploadRecordId,
+        source_row_number: index + 1,
         raw_employee_name: row.employeeName || null,
         raw_employee_code: row.employeeCode || null,
         raw_national_id: row.nationalId || null,
@@ -349,7 +354,7 @@ export async function POST(request) {
         extraction_error: extractionError,
         updated_at: new Date().toISOString(),
       })
-      .eq('id', uploadId);
+      .eq('id', uploadRecordId);
     if (finishError) throw finishError;
 
     await writeAuditLog(db, {
@@ -357,7 +362,7 @@ export async function POST(request) {
       action: 'UPLOAD_TIMESHEET',
       module: 'Attendance & Rosters',
       entityType: 'timesheet_upload',
-      entityId: uploadId,
+      entityId: uploadRecordId,
       details: `Uploaded paper timesheet for ${context.site.site_name} on ${date}.`,
       metadata: {
         site_id: context.site.id,
@@ -374,7 +379,7 @@ export async function POST(request) {
     return NextResponse.json({
       success: true,
       data: {
-        upload_id: uploadId,
+        upload_id: uploadRecordId,
         site: context.site,
         date,
         roster,
@@ -388,6 +393,13 @@ export async function POST(request) {
     });
   } catch (error) {
     console.error('Secure timesheet upload error:', error);
+    if (uploadRecordId) {
+      try {
+        await db.from('timesheet_uploads').delete().eq('id', uploadRecordId);
+      } catch (cleanupError) {
+        console.error('Timesheet DB cleanup failed:', cleanupError);
+      }
+    }
     if (uploadedPath) {
       try {
         await db.storage.from(BUCKET).remove([uploadedPath]);
