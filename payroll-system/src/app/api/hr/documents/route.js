@@ -36,9 +36,9 @@ function extensionForMime(mime) {
   return 'bin';
 }
 
-async function signedUrl(db, path) {
-  if (!path) return null;
-  const { data, error } = await db.storage.from(BUCKET).createSignedUrl(path, 60 * 60);
+async function signedUrl(db, bucket, path) {
+  if (!bucket || !path) return null;
+  const { data, error } = await db.storage.from(bucket).createSignedUrl(path, 60 * 60);
   return error ? null : data?.signedUrl || null;
 }
 
@@ -53,7 +53,7 @@ export async function GET(request) {
 
     let query = db
       .from('employee_documents')
-      .select('id, employee_id, document_type, file_name, original_filename, mime_type, uploaded_at, created_at, storage_path, issue_date, expiry_date, document_status, notes, is_current, uploaded_by, verified_by, verified_at')
+      .select('id, employee_id, document_type, file_name, original_filename, mime_type, uploaded_at, created_at, storage_bucket, storage_path, issue_date, expiry_date, document_status, notes, is_current, uploaded_by, verified_by, verified_at')
       .order('uploaded_at', { ascending: false });
     if (employeeId && employeeId !== 'ALL') query = query.eq('employee_id', employeeId);
 
@@ -75,12 +75,14 @@ export async function GET(request) {
 
     const result = await Promise.all((documents || []).map(async (doc) => {
       const employee = employeeMap.get(doc.employee_id);
-      const preview = await signedUrl(db, doc.storage_path);
+      const bucket = doc.storage_bucket || BUCKET;
+      const preview = await signedUrl(db, bucket, doc.storage_path);
       const effectiveStatus = doc.is_current && doc.expiry_date && doc.expiry_date < today && doc.document_status === 'valid'
         ? 'expired'
         : doc.document_status;
       return {
         ...doc,
+        storage_bucket: bucket,
         document_status: effectiveStatus,
         employee_name: employee ? `${employee.first_name || ''} ${employee.last_name || ''}`.trim() : 'Unknown Employee',
         employee_code: employee?.employee_code || null,
@@ -177,7 +179,7 @@ export async function POST(request) {
       metadata: { employee_id: employeeId, employee_code: employee.employee_code, document_type: documentType, expiry_date: expiryDate },
     });
 
-    return NextResponse.json({ success: true, data: { ...document, preview_url: await signedUrl(db, storagePath) } }, { status: 201 });
+    return NextResponse.json({ success: true, data: { ...document, preview_url: await signedUrl(db, BUCKET, storagePath) } }, { status: 201 });
   } catch (error) {
     console.error('HR document upload error:', error);
     if (storagePath) {
@@ -242,14 +244,15 @@ export async function DELETE(request) {
     const db = createSupabaseAdminClient();
     const { data: document, error: fetchError } = await db
       .from('employee_documents')
-      .select('id, employee_id, document_type, file_name, storage_path')
+      .select('id, employee_id, document_type, file_name, storage_bucket, storage_path')
       .eq('id', id)
       .maybeSingle();
     if (fetchError) throw fetchError;
     if (!document) return NextResponse.json({ success: false, error: 'Document not found.' }, { status: 404 });
 
+    const bucket = document.storage_bucket || BUCKET;
     if (document.storage_path) {
-      const { error: storageError } = await db.storage.from(BUCKET).remove([document.storage_path]);
+      const { error: storageError } = await db.storage.from(bucket).remove([document.storage_path]);
       if (storageError) throw storageError;
     }
 
