@@ -1,594 +1,173 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
+import { AlertTriangle, FileText, Loader2, Pencil, Plus, RefreshCw, Search, ShieldCheck, UserRound, Users, X } from 'lucide-react';
 import HRSideNav from '@/components/hr/HRSideNav';
 import HRNavbar from '@/components/hr/HRNavbar';
-import { 
-  Users, 
-  Plus, 
-  Search, 
-  X, 
-  Loader2,
-  Edit3,
-  FileText,
-  ExternalLink,
-  Smartphone,
-  Banknote,
-  CreditCard
-} from 'lucide-react';
+
+const EMPTY_FORM = {
+  employee_code: '',
+  first_name: '',
+  last_name: '',
+  national_id: '',
+  phone: '',
+  email: '',
+  job_role: '',
+  hourly_rate: '',
+  site_id: '',
+  status: 'Active',
+};
 
 export default function HREmployeesPage() {
-  // Dynamic DB State
   const [employees, setEmployees] = useState([]);
+  const [sites, setSites] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
   const [search, setSearch] = useState('');
-  const [activeTab, setActiveTab] = useState('roster'); // 'roster' | 'documents'
-  
-  // Edit Employee State
-  const [editingEmp, setEditingEmp] = useState(null);
+  const [siteFilter, setSiteFilter] = useState('all');
+  const [statusFilter, setStatusFilter] = useState('all');
+  const [modal, setModal] = useState(null);
+  const [form, setForm] = useState(EMPTY_FORM);
   const [saving, setSaving] = useState(false);
 
-  // Add Employee Modal State
-  const [isAddModalOpen, setIsAddModalOpen] = useState(false);
-  const [creating, setCreating] = useState(false);
-  const [newEmp, setNewEmp] = useState({
-    first_name: '',
-    last_name: '',
-    role: '',
-    site: '',
-    rate: '',
-    paymentChannel: 'EFT',
-    bankName: '',
-    accountNumber: '',
-    mobileNumber: '',
-    nationalId: ''
-  });
-
-  const fetchEmployees = async () => {
+  const load = useCallback(async () => {
+    setLoading(true);
+    setError('');
     try {
-      const res = await fetch('/api/hr/employees');
-      
-      if (!res.ok) {
-        throw new Error(`Server returned status ${res.status}`);
-      }
-
-      const json = await res.json();
-      if (json.success) {
-        setEmployees(json.data || []);
-      }
+      const response = await fetch('/api/hr/employees', { cache: 'no-store' });
+      const result = await response.json();
+      if (!response.ok || !result.success) throw new Error(result.error || 'Could not load employees.');
+      setEmployees(result.data || []);
+      setSites(result.sites || []);
     } catch (err) {
-      console.error('Failed to load employees:', err);
+      setError(err.message);
     } finally {
       setLoading(false);
     }
-  };
-
-  useEffect(() => {
-    fetchEmployees();
   }, []);
 
-  const handleCreateEmployee = async (e) => {
-    e.preventDefault();
-    setCreating(true);
-    try {
-      const res = await fetch('/api/hr/employees', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(newEmp),
-      });
+  useEffect(() => { load(); }, [load]);
 
-      if (!res.ok) {
-        throw new Error(`Server error: ${res.status}`);
-      }
+  const filtered = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    return employees.filter((employee) => {
+      const matchesSearch = !q || [employee.name, employee.employee_code, employee.job_role, employee.national_id, employee.site?.site_name].some((value) => String(value || '').toLowerCase().includes(q));
+      const matchesSite = siteFilter === 'all' || (siteFilter === 'unassigned' ? !employee.site : employee.site?.id === siteFilter);
+      const matchesStatus = statusFilter === 'all' || employee.status === statusFilter;
+      return matchesSearch && matchesSite && matchesStatus;
+    });
+  }, [employees, search, siteFilter, statusFilter]);
 
-      const json = await res.json();
-      if (json.success) {
-        setIsAddModalOpen(false);
-        setNewEmp({
-          first_name: '',
-          last_name: '',
-          role: '',
-          site: '',
-          rate: '',
-          paymentChannel: 'EFT',
-          bankName: '',
-          accountNumber: '',
-          mobileNumber: '',
-          nationalId: ''
-        });
-        fetchEmployees();
-      } else {
-        alert(json.error || 'Failed to create employee');
-      }
-    } catch (err) {
-      alert('Error creating employee. Check server logs.');
-    } finally {
-      setCreating(false);
-    }
-  };
+  function openCreate() {
+    setForm(EMPTY_FORM);
+    setModal({ type: 'create' });
+  }
 
-  const handleUpdateEmployee = async (e) => {
-    e.preventDefault();
+  function openEdit(employee) {
+    setForm({
+      employee_code: employee.employee_code || '',
+      first_name: employee.first_name || '',
+      last_name: employee.last_name || '',
+      national_id: employee.national_id || '',
+      phone: employee.phone || '',
+      email: employee.email || '',
+      job_role: employee.job_role || '',
+      hourly_rate: employee.hourly_rate ?? '',
+      site_id: employee.site?.id || '',
+      status: employee.status || 'Active',
+    });
+    setModal({ type: 'edit', employee });
+  }
+
+  async function saveEmployee(event) {
+    event.preventDefault();
     setSaving(true);
+    setError('');
     try {
-      const res = await fetch('/api/hr/employees', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          id: editingEmp.id,
-          firstName: editingEmp.first_name,
-          lastName: editingEmp.last_name,
-          contractType: editingEmp.role || 'CASUAL',
-          siteId: editingEmp.site || null,
-          payRateType: 'HOURLY',
-          rate: parseFloat(editingEmp.rate) || 0.00,
-          nationalId: editingEmp.nationalId,
-          bankName: editingEmp.bankName,
-          accountNumber: editingEmp.accountNumber,
-        }),
-      });
+      const payload = {
+        ...form,
+        hourly_rate: Number(form.hourly_rate),
+        site_id: form.site_id || null,
+      };
+      if (modal?.type === 'edit') payload.id = modal.employee.id;
 
-      const json = await res.json();
-      if (json.success) {
-        setEditingEmp(null);
-        fetchEmployees();
-      } else {
-        alert(json.error || 'Failed to update employee details');
-      }
+      const response = await fetch('/api/hr/employees', {
+        method: modal?.type === 'edit' ? 'PATCH' : 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const result = await response.json();
+      if (!response.ok || !result.success) throw new Error(result.error || 'Could not save employee.');
+      setModal(null);
+      setForm(EMPTY_FORM);
+      await load();
     } catch (err) {
-      alert('Error updating employee details. Check server logs.');
+      setError(err.message);
     } finally {
       setSaving(false);
     }
-  };
-
-  const filteredEmployees = employees.filter((emp) => {
-    const q = search.toLowerCase();
-    return (
-      (emp.name && emp.name.toLowerCase().includes(q)) ||
-      (emp.role && emp.role.toLowerCase().includes(q)) ||
-      (emp.site && emp.site.toLowerCase().includes(q)) ||
-      (emp.employee_code && emp.employee_code.toLowerCase().includes(q))
-    );
-  });
-
-  const renderPaymentBadge = (channel) => {
-    const ch = (channel || 'EFT').toUpperCase();
-    if (ch.includes('MOBILE')) {
-      return (
-        <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold bg-amber-50 text-amber-700 border border-amber-200">
-          <Smartphone className="w-3.5 h-3.5 text-amber-600" /> Mobile Money
-        </span>
-      );
-    }
-    if (ch.includes('CASH')) {
-      return (
-        <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
-          <Banknote className="w-3.5 h-3.5 text-emerald-600" /> Cash
-        </span>
-      );
-    }
-    return (
-      <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold bg-indigo-50 text-indigo-700 border border-indigo-200">
-        <CreditCard className="w-3.5 h-3.5 text-indigo-600" /> EFT
-      </span>
-    );
-  };
+  }
 
   return (
-    <div className="min-h-screen bg-slate-50 flex flex-col lg:flex-row text-slate-900 font-sans">
+    <div className="min-h-screen bg-slate-100 flex flex-col lg:flex-row text-slate-900">
       <HRSideNav />
-
-      <div className="flex-1 flex flex-col min-w-0">
+      <div className="flex-1 min-w-0">
         <HRNavbar />
+        <main className="p-4 sm:p-6 lg:p-8 max-w-7xl mx-auto space-y-6">
+          <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+            <div><p className="text-[11px] uppercase tracking-[0.16em] font-bold text-indigo-600">Employee Master</p><h1 className="mt-1 text-2xl sm:text-3xl font-black">Employees</h1><p className="mt-1 text-sm text-slate-500">HR creates ordinary workers, sets their current job/rate, assigns existing company sites, and maintains their employment file.</p></div>
+            <div className="flex gap-2"><button onClick={load} className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-4 py-2.5 text-xs font-bold"><RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />Refresh</button><button onClick={openCreate} className="inline-flex items-center gap-2 rounded-xl bg-indigo-600 px-4 py-2.5 text-xs font-bold text-white"><Plus className="w-4 h-4" />Add Employee</button></div>
+          </section>
 
-        <main className="p-4 sm:p-6 lg:p-8 space-y-6 max-w-7xl mx-auto w-full">
-          {/* Header */}
-          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-white p-6 rounded-3xl border border-slate-200/80 shadow-xs">
-            <div>
-              <div className="flex items-center gap-2 text-xs font-extrabold text-indigo-600 uppercase tracking-wider mb-1">
-                <Users className="w-4 h-4" /> Personnel Compliance Archive
-              </div>
-              <h1 className="text-2xl sm:text-3xl font-black text-slate-900 tracking-tight">
-                Employee Directory & Onboarding
-              </h1>
-              <p className="text-slate-500 text-sm mt-1">
-                Manage site rosters, payment preference channels, and attached legal compliance files.
-              </p>
-            </div>
-            <button
-              onClick={() => setIsAddModalOpen(true)}
-              className="inline-flex items-center justify-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-sm px-5 py-3 rounded-2xl transition shadow-md shadow-indigo-600/20 active:scale-95 shrink-0 cursor-pointer"
-            >
-              <Plus className="w-4 h-4" /> Add New Employee
-            </button>
-          </div>
+          {error && <div className="rounded-2xl border border-rose-200 bg-rose-50 p-4 text-sm font-semibold text-rose-700 flex items-center gap-2"><AlertTriangle className="w-4 h-4" />{error}</div>}
 
-          {/* Search & Tabs */}
-          <div className="bg-white p-4 rounded-3xl border border-slate-200/80 shadow-xs space-y-4">
-            <div className="relative">
-              <Search className="w-4 h-4 text-slate-400 absolute left-4 top-3.5" />
-              <input
-                type="text"
-                placeholder="Search by name, role, site, or code..."
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                className="w-full pl-11 pr-4 py-2.5 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-medium focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition"
-              />
-            </div>
+          <section className="rounded-3xl border border-slate-200 bg-white p-4 shadow-sm grid grid-cols-1 md:grid-cols-3 gap-3">
+            <div className="relative"><Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" /><input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search employee, code, role, site..." className="w-full rounded-xl border border-slate-200 bg-slate-50 pl-10 pr-3 py-2.5 text-sm" /></div>
+            <select value={siteFilter} onChange={(e) => setSiteFilter(e.target.value)} className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm font-semibold"><option value="all">All Sites</option><option value="unassigned">Unassigned</option>{sites.map((site) => <option key={site.id} value={site.id}>{site.site_name}</option>)}</select>
+            <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm font-semibold"><option value="all">All Statuses</option><option value="Active">Active</option><option value="Suspended">Suspended</option><option value="Terminated">Terminated</option></select>
+          </section>
 
-            <div className="flex items-center gap-2 border-b border-slate-100 pb-2">
-              <button
-                onClick={() => setActiveTab('roster')}
-                className={`px-4 py-2 rounded-xl text-xs font-extrabold transition cursor-pointer ${
-                  activeTab === 'roster'
-                    ? 'bg-indigo-50 text-indigo-700 border border-indigo-200'
-                    : 'text-slate-500 hover:text-slate-800'
-                }`}
-              >
-                Active Personnel ({filteredEmployees.length})
-              </button>
-              <button
-                onClick={() => setActiveTab('documents')}
-                className={`px-4 py-2 rounded-xl text-xs font-extrabold transition cursor-pointer ${
-                  activeTab === 'documents'
-                    ? 'bg-indigo-50 text-indigo-700 border border-indigo-200'
-                    : 'text-slate-500 hover:text-slate-800'
-                }`}
-              >
-                Document Vault Quick View
-              </button>
-            </div>
-          </div>
-
-          {/* Main Table */}
-          <div className="bg-white rounded-3xl border border-slate-200/80 shadow-xs overflow-hidden">
-            {loading ? (
-              <div className="p-12 text-center text-xs text-slate-400 flex items-center justify-center gap-2">
-                <Loader2 className="w-4 h-4 animate-spin" /> Loading personnel records...
-              </div>
-            ) : filteredEmployees.length === 0 ? (
-              <div className="p-12 text-center text-xs text-slate-500 font-medium">
-                No employees found matching your search.
-              </div>
-            ) : activeTab === 'roster' ? (
-              <div className="overflow-x-auto">
-                <table className="w-full text-left text-sm text-slate-600">
-                  <thead className="bg-slate-50/80 text-[11px] uppercase tracking-wider font-extrabold text-slate-400 border-b border-slate-100">
-                    <tr>
-                      <th className="px-6 py-4">Code</th>
-                      <th className="px-6 py-4">Employee Name</th>
-                      <th className="px-6 py-4">Job Title</th>
-                      <th className="px-6 py-4">Mine Site</th>
-                      <th className="px-6 py-4">Base Hourly Rate</th>
-                      <th className="px-6 py-4">Payment Method</th>
-                      <th className="px-6 py-4 text-right">Actions</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-100 font-medium">
-                    {filteredEmployees.map((emp) => (
-                      <tr key={emp.id} className="hover:bg-slate-50/60 transition">
-                        <td className="px-6 py-4 font-bold text-indigo-600 text-xs">
-                          {emp.employee_code || `EMP-${emp.id.substring(0, 4)}`}
-                        </td>
-                        <td className="px-6 py-4">
-                          <div className="font-bold text-slate-900">{emp.name}</div>
-                          <div className="text-[11px] text-slate-400">{emp.nationalId || 'No ID Logged'}</div>
-                        </td>
-                        <td className="px-6 py-4 text-slate-700 font-semibold">{emp.role}</td>
-                        <td className="px-6 py-4">
-                          <span className="px-2.5 py-1 rounded-lg text-xs font-bold bg-slate-100 text-slate-700">
-                            {emp.site}
-                          </span>
-                        </td>
-                        <td className="px-6 py-4 font-bold text-slate-900">{emp.formatted_rate}</td>
-                        <td className="px-6 py-4">{renderPaymentBadge(emp.paymentChannel)}</td>
-                        <td className="px-6 py-4 text-right">
-                          <div className="flex items-center justify-end gap-2">
-                            <button
-                              onClick={() => setEditingEmp(emp)}
-                              className="p-2 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-xl transition cursor-pointer"
-                              title="Edit Employee HR Details"
-                            >
-                              <Edit3 className="w-4 h-4" />
-                            </button>
-                            <Link
-                              href={`/dashboard/hr/documents?employeeId=${emp.id}`}
-                              className="p-2 text-slate-400 hover:text-emerald-600 hover:bg-emerald-50 rounded-xl transition inline-flex items-center gap-1"
-                              title="View Document Vault"
-                            >
-                              <FileText className="w-4 h-4" />
-                            </Link>
-                          </div>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            ) : (
-              /* Quick Document Vault View */
-              <div className="p-6 space-y-4">
-                <div className="flex justify-between items-center pb-2 border-b border-slate-100">
-                  <h3 className="font-extrabold text-sm text-slate-900">Personnel Compliance Files</h3>
-                  <Link
-                    href="/dashboard/hr/documents"
-                    className="text-xs font-bold text-indigo-600 hover:underline flex items-center gap-1"
-                  >
-                    Open Documents Archive <ExternalLink className="w-3.5 h-3.5" />
-                  </Link>
-                </div>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  {filteredEmployees.map((emp) => (
-                    <div key={emp.id} className="p-4 rounded-2xl border border-slate-200 bg-slate-50/50 flex justify-between items-center">
-                      <div>
-                        <div className="font-bold text-slate-900 text-sm">{emp.name}</div>
-                        <div className="text-xs text-slate-500">{emp.role} • {emp.site}</div>
-                      </div>
-                      <Link
-                        href={`/dashboard/hr/documents?employeeId=${emp.id}`}
-                        className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold transition flex items-center gap-1.5"
-                      >
-                        <FileText className="w-3.5 h-3.5" /> View Documents
-                      </Link>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-          </div>
+          <section className="rounded-3xl border border-slate-200 bg-white shadow-sm overflow-hidden">
+            <div className="p-5 border-b border-slate-100 flex items-center justify-between"><h2 className="font-black flex items-center gap-2"><Users className="w-5 h-5 text-indigo-600" />Workforce Directory</h2><span className="text-xs text-slate-400 font-bold">{filtered.length} employees</span></div>
+            {loading ? <div className="p-16 flex items-center justify-center gap-2 text-sm text-slate-500"><Loader2 className="w-5 h-5 animate-spin text-indigo-600" />Loading employees...</div> : filtered.length === 0 ? <div className="p-14 text-center text-sm text-slate-500">No employees match the current filters.</div> : <div className="overflow-x-auto"><table className="w-full text-left"><thead className="bg-slate-50 text-[10px] uppercase tracking-wider text-slate-400"><tr><th className="px-5 py-3">Employee</th><th className="px-5 py-3">Role</th><th className="px-5 py-3">Site</th><th className="px-5 py-3">Rate</th><th className="px-5 py-3">Documents</th><th className="px-5 py-3">Compliance</th><th className="px-5 py-3">Status</th><th className="px-5 py-3 text-right">Actions</th></tr></thead><tbody className="divide-y divide-slate-100">{filtered.map((employee) => <EmployeeRow key={employee.id} employee={employee} onEdit={() => openEdit(employee)} />)}</tbody></table></div>}
+          </section>
         </main>
       </div>
 
-      {/* Add New Employee Modal */}
-      {isAddModalOpen && (
-        <div className="fixed inset-0 z-50 bg-slate-900/40 backdrop-blur-xs flex items-center justify-center p-4">
-          <div className="bg-white rounded-3xl max-w-lg w-full p-6 space-y-4 shadow-2xl border border-slate-100 max-h-[90vh] overflow-y-auto">
-            <div className="flex justify-between items-center pb-2 border-b border-slate-100">
-              <h3 className="font-extrabold text-slate-900 text-lg">Add New Employee</h3>
-              <button 
-                onClick={() => setIsAddModalOpen(false)} 
-                className="text-slate-400 hover:text-slate-600 cursor-pointer"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            <form onSubmit={handleCreateEmployee} className="space-y-4">
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="text-xs font-bold text-slate-600">First Name</label>
-                  <input
-                    type="text"
-                    value={newEmp.first_name}
-                    onChange={(e) => setNewEmp({ ...newEmp, first_name: e.target.value })}
-                    className="w-full mt-1 p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-medium focus:ring-2 focus:ring-indigo-500/20"
-                    required
-                  />
-                </div>
-                <div>
-                  <label className="text-xs font-bold text-slate-600">Last Name</label>
-                  <input
-                    type="text"
-                    value={newEmp.last_name}
-                    onChange={(e) => setNewEmp({ ...newEmp, last_name: e.target.value })}
-                    className="w-full mt-1 p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-medium focus:ring-2 focus:ring-indigo-500/20"
-                    required
-                  />
-                </div>
+      {modal && (
+        <div className="fixed inset-0 z-50 bg-slate-950/60 backdrop-blur-sm p-4 flex items-center justify-center">
+          <div className="w-full max-w-2xl rounded-3xl bg-white shadow-2xl max-h-[92vh] overflow-y-auto">
+            <div className="p-5 border-b border-slate-100 flex items-center justify-between"><div><h2 className="font-black text-lg">{modal.type === 'create' ? 'Add Employee' : 'Edit Employee'}</h2><p className="text-xs text-slate-500 mt-1">Sites come from Admin-created active sites. HR cannot create a new site here.</p></div><button onClick={() => setModal(null)} className="p-2 rounded-xl hover:bg-slate-100 text-slate-500"><X className="w-5 h-5" /></button></div>
+            <form onSubmit={saveEmployee} className="p-5 space-y-5">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                {modal.type === 'create' && <Field label="Employee Code (optional)" value={form.employee_code} onChange={(value) => setForm({ ...form, employee_code: value })} placeholder="Auto-generated if blank" />}
+                <Field label="National ID / Omang" value={form.national_id} onChange={(value) => setForm({ ...form, national_id: value })} />
+                <Field required label="First Name" value={form.first_name} onChange={(value) => setForm({ ...form, first_name: value })} />
+                <Field required label="Last Name" value={form.last_name} onChange={(value) => setForm({ ...form, last_name: value })} />
+                <Field label="Phone" value={form.phone} onChange={(value) => setForm({ ...form, phone: value })} />
+                <Field label="Email" type="email" value={form.email} onChange={(value) => setForm({ ...form, email: value })} />
+                <Field required label="Job Role" value={form.job_role} onChange={(value) => setForm({ ...form, job_role: value })} />
+                <Field required label="Hourly Rate (BWP)" type="number" min="0" step="0.01" value={form.hourly_rate} onChange={(value) => setForm({ ...form, hourly_rate: value })} />
+                <label className="space-y-1"><span className="text-xs font-bold text-slate-600">Assigned Site</span><select value={form.site_id} onChange={(e) => setForm({ ...form, site_id: e.target.value })} className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm"><option value="">Unassigned</option>{sites.map((site) => <option key={site.id} value={site.id}>{site.site_name} {site.location ? `— ${site.location}` : ''}</option>)}</select></label>
+                {modal.type === 'edit' && <label className="space-y-1"><span className="text-xs font-bold text-slate-600">Employment Status</span><select value={form.status} onChange={(e) => setForm({ ...form, status: e.target.value })} className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm"><option>Active</option><option>Suspended</option><option>Terminated</option></select></label>}
               </div>
-
-              <div>
-                <label className="text-xs font-bold text-slate-600">National ID / Passport Number</label>
-                <input
-                  type="text"
-                  value={newEmp.nationalId}
-                  onChange={(e) => setNewEmp({ ...newEmp, nationalId: e.target.value })}
-                  className="w-full mt-1 p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-medium focus:ring-2 focus:ring-indigo-500/20"
-                />
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="text-xs font-bold text-slate-600">Job Title / Role</label>
-                  <input
-                    type="text"
-                    value={newEmp.role}
-                    onChange={(e) => setNewEmp({ ...newEmp, role: e.target.value })}
-                    className="w-full mt-1 p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-medium focus:ring-2 focus:ring-indigo-500/20"
-                    required
-                  />
-                </div>
-                <div>
-                  <label className="text-xs font-bold text-slate-600">Mine Site Location</label>
-                  <input
-                    type="text"
-                    value={newEmp.site}
-                    onChange={(e) => setNewEmp({ ...newEmp, site: e.target.value })}
-                    className="w-full mt-1 p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-medium focus:ring-2 focus:ring-indigo-500/20"
-                    required
-                  />
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="text-xs font-bold text-slate-600">Hourly Rate (BWP)</label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    value={newEmp.rate}
-                    onChange={(e) => setNewEmp({ ...newEmp, rate: e.target.value })}
-                    className="w-full mt-1 p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-medium focus:ring-2 focus:ring-indigo-500/20"
-                    required
-                  />
-                </div>
-                <div>
-                  <label className="text-xs font-bold text-slate-600">Payment Channel</label>
-                  <select
-                    value={newEmp.paymentChannel}
-                    onChange={(e) => setNewEmp({ ...newEmp, paymentChannel: e.target.value })}
-                    className="w-full mt-1 p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-800 focus:ring-2 focus:ring-indigo-500/20"
-                  >
-                    <option value="EFT">Bank EFT Transfer</option>
-                    <option value="MOBILE_MONEY">Mobile Money Transfer</option>
-                    <option value="CASH">Cash Disbursement</option>
-                  </select>
-                </div>
-              </div>
-
-              {/* Dynamic Payout Fields */}
-              {newEmp.paymentChannel === 'EFT' && (
-                <div className="grid grid-cols-2 gap-3 pt-2 border-t border-slate-100">
-                  <div>
-                    <label className="text-xs font-bold text-slate-600">Bank Name</label>
-                    <input
-                      type="text"
-                      value={newEmp.bankName}
-                      onChange={(e) => setNewEmp({ ...newEmp, bankName: e.target.value })}
-                      className="w-full mt-1 p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-medium focus:ring-2 focus:ring-indigo-500/20"
-                    />
-                  </div>
-                  <div>
-                    <label className="text-xs font-bold text-slate-600">Account Number</label>
-                    <input
-                      type="text"
-                      value={newEmp.accountNumber}
-                      onChange={(e) => setNewEmp({ ...newEmp, accountNumber: e.target.value })}
-                      className="w-full mt-1 p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-medium focus:ring-2 focus:ring-indigo-500/20"
-                    />
-                  </div>
-                </div>
-              )}
-
-              {newEmp.paymentChannel === 'MOBILE_MONEY' && (
-                <div className="pt-2 border-t border-slate-100">
-                  <label className="text-xs font-bold text-slate-600">Mobile Payout Phone Number</label>
-                  <input
-                    type="text"
-                    value={newEmp.mobileNumber}
-                    onChange={(e) => setNewEmp({ ...newEmp, mobileNumber: e.target.value })}
-                    className="w-full mt-1 p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-medium focus:ring-2 focus:ring-indigo-500/20"
-                  />
-                </div>
-              )}
-
-              <div className="flex items-center justify-end gap-2 pt-4 border-t border-slate-100">
-                <button
-                  type="button"
-                  onClick={() => setIsAddModalOpen(false)}
-                  className="px-4 py-2 rounded-xl text-xs font-bold text-slate-500 hover:bg-slate-100 cursor-pointer"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  disabled={creating}
-                  className="px-5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer"
-                >
-                  {creating && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
-                  Save & Register Employee
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {/* Edit Employee Modal */}
-      {editingEmp && (
-        <div className="fixed inset-0 z-50 bg-slate-900/40 backdrop-blur-xs flex items-center justify-center p-4">
-          <div className="bg-white rounded-3xl max-w-lg w-full p-6 space-y-4 shadow-2xl border border-slate-100">
-            <div className="flex justify-between items-center pb-2 border-b border-slate-100">
-              <h3 className="font-extrabold text-slate-900 text-lg">Update Employee HR Details</h3>
-              <button onClick={() => setEditingEmp(null)} className="text-slate-400 hover:text-slate-600 cursor-pointer">
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            <form onSubmit={handleUpdateEmployee} className="space-y-4">
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="text-xs font-bold text-slate-600">First Name</label>
-                  <input
-                    type="text"
-                    value={editingEmp.first_name || ''}
-                    onChange={(e) => setEditingEmp({ ...editingEmp, first_name: e.target.value })}
-                    className="w-full mt-1 p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-medium focus:ring-2 focus:ring-indigo-500/20"
-                    required
-                  />
-                </div>
-                <div>
-                  <label className="text-xs font-bold text-slate-600">Last Name</label>
-                  <input
-                    type="text"
-                    value={editingEmp.last_name || ''}
-                    onChange={(e) => setEditingEmp({ ...editingEmp, last_name: e.target.value })}
-                    className="w-full mt-1 p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-medium focus:ring-2 focus:ring-indigo-500/20"
-                    required
-                  />
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="text-xs font-bold text-slate-600">Job Title</label>
-                  <input
-                    type="text"
-                    value={editingEmp.role || ''}
-                    onChange={(e) => setEditingEmp({ ...editingEmp, role: e.target.value })}
-                    className="w-full mt-1 p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-medium focus:ring-2 focus:ring-indigo-500/20"
-                    required
-                  />
-                </div>
-                <div>
-                  <label className="text-xs font-bold text-slate-600">Hourly Rate (BWP)</label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    value={editingEmp.rate || ''}
-                    onChange={(e) => setEditingEmp({ ...editingEmp, rate: e.target.value })}
-                    className="w-full mt-1 p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-medium focus:ring-2 focus:ring-indigo-500/20"
-                    required
-                  />
-                </div>
-              </div>
-
-              <div>
-                <label className="text-xs font-bold text-slate-600">Payment Channel</label>
-                <select
-                  value={editingEmp.paymentChannel}
-                  onChange={(e) => setEditingEmp({ ...editingEmp, paymentChannel: e.target.value })}
-                  className="w-full mt-1 p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-800 focus:ring-2 focus:ring-indigo-500/20"
-                >
-                  <option value="EFT">Bank EFT Transfer</option>
-                  <option value="MOBILE_MONEY">Mobile Money Transfer</option>
-                  <option value="CASH">Cash Disbursement</option>
-                </select>
-              </div>
-
-              <div className="flex items-center justify-end gap-2 pt-4 border-t border-slate-100">
-                <button
-                  type="button"
-                  onClick={() => setEditingEmp(null)}
-                  className="px-4 py-2 rounded-xl text-xs font-bold text-slate-500 hover:bg-slate-100 cursor-pointer"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  disabled={saving}
-                  className="px-5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer"
-                >
-                  {saving && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
-                  Save Changes
-                </button>
-              </div>
+              <div className="rounded-2xl border border-indigo-100 bg-indigo-50 p-4 text-xs text-indigo-800"><strong>History protection:</strong> changing site, role or rate creates/updates normalized employment history. Existing attendance rate snapshots are not rewritten.</div>
+              <div className="flex justify-end gap-2"><button type="button" onClick={() => setModal(null)} className="rounded-xl px-4 py-2.5 text-sm font-bold text-slate-600">Cancel</button><button disabled={saving} className="inline-flex items-center gap-2 rounded-xl bg-indigo-600 px-5 py-2.5 text-sm font-bold text-white disabled:opacity-50">{saving && <Loader2 className="w-4 h-4 animate-spin" />}{modal.type === 'create' ? 'Create Employee' : 'Save Changes'}</button></div>
             </form>
           </div>
         </div>
       )}
     </div>
   );
+}
+
+function EmployeeRow({ employee, onEdit }) {
+  const alertCount = employee.compliance_alerts?.length || 0;
+  const statusClass = employee.status === 'Active' ? 'bg-emerald-50 text-emerald-700' : employee.status === 'Suspended' ? 'bg-amber-50 text-amber-700' : 'bg-rose-50 text-rose-700';
+  return <tr className="text-sm hover:bg-slate-50/60"><td className="px-5 py-4"><div className="flex items-center gap-3"><div className="rounded-xl bg-indigo-50 p-2.5 text-indigo-600"><UserRound className="w-4 h-4" /></div><div><div className="font-bold text-slate-900">{employee.name}</div><div className="text-[11px] text-slate-400">{employee.employee_code || 'No code'}{employee.national_id ? ` • ${employee.national_id}` : ''}</div></div></div></td><td className="px-5 py-4 font-semibold">{employee.job_role || 'Unassigned'}</td><td className="px-5 py-4">{employee.site?.site_name || <span className="text-amber-700 font-bold">Unassigned</span>}</td><td className="px-5 py-4 font-black">{employee.hourly_rate === null ? '—' : `P${Number(employee.hourly_rate).toFixed(2)}/h`}</td><td className="px-5 py-4"><Link href={`/dashboard/hr/documents?employeeId=${employee.id}`} className="inline-flex items-center gap-1.5 text-indigo-600 font-bold"><FileText className="w-4 h-4" />{employee.document_count}</Link></td><td className="px-5 py-4">{alertCount ? <span title={employee.compliance_alerts.join('\n')} className="inline-flex items-center gap-1.5 rounded-full bg-amber-50 px-2.5 py-1 text-[10px] font-bold text-amber-700"><AlertTriangle className="w-3 h-3" />{alertCount} alert{alertCount === 1 ? '' : 's'}</span> : <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-50 px-2.5 py-1 text-[10px] font-bold text-emerald-700"><ShieldCheck className="w-3 h-3" />Clear</span>}</td><td className="px-5 py-4"><span className={`rounded-full px-2.5 py-1 text-[10px] font-bold ${statusClass}`}>{employee.status}</span></td><td className="px-5 py-4 text-right"><button onClick={onEdit} className="p-2 rounded-xl text-slate-500 hover:bg-indigo-50 hover:text-indigo-600" title="Edit employee"><Pencil className="w-4 h-4" /></button></td></tr>;
+}
+
+function Field({ label, value, onChange, required = false, type = 'text', ...props }) {
+  return <label className="space-y-1"><span className="text-xs font-bold text-slate-600">{label}</span><input required={required} type={type} value={value} onChange={(e) => onChange(e.target.value)} className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm outline-none focus:border-indigo-500" {...props} /></label>;
 }
