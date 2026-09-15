@@ -1,387 +1,108 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
+import { AlertTriangle, ArrowRight, Building2, CheckCircle2, ClipboardCheck, Loader2, RefreshCw, Users, XCircle } from 'lucide-react';
 import HRSideNav from '@/components/hr/HRSideNav';
 import HRNavbar from '@/components/hr/HRNavbar';
-import { 
-  FileSearch, 
-  CheckSquare, 
-  FolderOpen,
-  AlertCircle, 
-  CheckCircle2, 
-  ArrowRight,
-  UserCheck,
-  Clock,
-  Loader2,
-  Users,
-  X,
-  FileText,
-  ExternalLink,
-  Building2
-} from 'lucide-react';
+
+const STATUS = {
+  submitted_to_hr: { label: 'Waiting for HR', className: 'bg-amber-50 text-amber-700 border-amber-200' },
+  approved: { label: 'Approved', className: 'bg-emerald-50 text-emerald-700 border-emerald-200' },
+  rejected: { label: 'Rejected', className: 'bg-rose-50 text-rose-700 border-rose-200' },
+};
 
 export default function HRDashboardPage() {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [actioningId, setActioningId] = useState(null);
-  const [notification, setNotification] = useState(null);
+  const [error, setError] = useState('');
 
-  const triggerNotification = (message) => {
-    setNotification(message);
-    setTimeout(() => {
-      setNotification(null);
-    }, 4000);
-  };
-
-  const fetchHrDashboard = async () => {
+  const load = useCallback(async () => {
+    setLoading(true);
+    setError('');
     try {
-      const res = await fetch('/api/hr/dashboard');
-      const json = await res.json();
-      if (json.success) {
-        setData(json);
-      }
+      const response = await fetch('/api/hr/dashboard', { cache: 'no-store' });
+      const result = await response.json();
+      if (!response.ok || !result.success) throw new Error(result.error || 'Could not load HR dashboard.');
+      setData(result.data);
     } catch (err) {
-      console.error('Failed loading HR Dashboard data:', err);
-    }  finally {
+      setError(err.message);
+    } finally {
       setLoading(false);
-    }
-  };
-
-  useEffect(() => {
-    fetchHrDashboard();
-
-    if (typeof window !== 'undefined') {
-      const params = new URLSearchParams(window.location.search);
-      if (params.get('created') === 'true') {
-        triggerNotification('Employee profile created successfully!');
-      }
     }
   }, []);
 
-  const handleApproveShift = async (shiftId) => {
-    setActioningId(shiftId);
-    try {
-      const res = await fetch('/api/hr/verify-shift', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ shiftId, status: 'APPROVED' }),
-      });
-      const json = await res.json();
-      if (json.success) {
-        triggerNotification('Shift log verified and approved successfully!');
-        
-        setData((prev) => prev ? {
-          ...prev,
-          pendingQueue: prev.pendingQueue.filter((q) => q.id !== shiftId),
-          stats: {
-            ...prev.stats,
-            pendingReviews: Math.max(0, (prev.stats?.pendingReviews || 1) - 1),
-            readyForStaging: (prev.stats?.readyForStaging || 0) + 1,
-          }
-        } : prev);
+  useEffect(() => { load(); }, [load]);
 
-        fetchHrDashboard();
-      } else {
-        alert(json.message || 'Failed to update shift record in database.');
-      }
-    } catch (err) {
-      alert('Network error while processing verification.');
-    } finally {
-      setActioningId(null);
-    }
-  };
-
-  const statsList = [
-    { 
-      name: 'Active Personnel', 
-      value: data?.stats?.activePersonnel ?? 0, 
-      change: 'Synced with database roster', 
-      color: 'bg-indigo-600', 
-      icon: Users, 
-      href: '/dashboard/hr/employees' 
-    },
-    { 
-      name: 'Pending Shift Reviews', 
-      value: (data?.stats?.pendingReviews ?? 0) + (data?.pendingRosters?.length ?? 0), 
-      change: 'Requires inline review', 
-      color: 'bg-amber-500', 
-      icon: FileSearch, 
-      href: '/dashboard/hr/absences' 
-    },
-    { 
-      name: 'Ready for Staging', 
-      value: data?.stats?.readyForStaging ?? 0, 
-      change: 'Verified timesheets', 
-      color: 'bg-emerald-600', 
-      icon: CheckSquare, 
-      href: '/dashboard/hr/staging' 
-    },
-    { 
-      name: 'Rate Audit Alerts', 
-      value: data?.stats?.unmatchedRates ?? 0, 
-      change: 'Requires contract check', 
-      color: 'bg-rose-500', 
-      icon: FolderOpen, 
-      href: '/dashboard/hr/employees' 
-    },
-  ];
-
-  const readinessValue = Math.min(100, Math.max(0, data?.stats?.readinessPercentage ?? 0));
+  const stats = data?.stats || {};
+  const pending = data?.pending_rosters || [];
 
   return (
-    <div className="min-h-screen bg-slate-50 flex flex-col lg:flex-row font-sans text-slate-900 relative">
-      {notification && (
-        <div className="fixed top-5 right-5 z-50 animate-in fade-in slide-in-from-top-4 duration-300">
-          <div className="bg-emerald-900 text-emerald-100 border border-emerald-700 px-5 py-3.5 rounded-2xl shadow-2xl flex items-center gap-3">
-            <CheckCircle2 className="w-5 h-5 text-emerald-400 shrink-0" />
-            <span className="text-xs font-bold">{notification}</span>
-            <button 
-              onClick={() => setNotification(null)}
-              className="text-emerald-400 hover:text-white transition ml-2 cursor-pointer"
-            >
-              <X className="w-4 h-4" />
-            </button>
-          </div>
-        </div>
-      )}
-
+    <div className="min-h-screen bg-slate-100 flex flex-col lg:flex-row text-slate-900">
       <HRSideNav />
-
-      <div className="flex-1 flex flex-col min-w-0">
+      <div className="flex-1 min-w-0">
         <HRNavbar />
-
-        <main className="p-4 sm:p-6 lg:p-8 space-y-8 max-w-7xl mx-auto w-full">
-          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-white p-6 rounded-3xl border border-slate-200/80 shadow-xs">
+        <main className="p-4 sm:p-6 lg:p-8 max-w-7xl mx-auto space-y-6">
+          <section className="rounded-3xl bg-slate-950 text-white p-6 sm:p-7 shadow-md flex flex-col md:flex-row md:items-center justify-between gap-4">
             <div>
-              <div className="flex items-center gap-2 text-xs font-extrabold text-indigo-600 uppercase tracking-wider mb-1">
-                <UserCheck className="w-4 h-4" />
-                <span>Compliance & Gatekeeping</span>
-              </div>
-              <h1 className="text-2xl sm:text-3xl font-black text-slate-900 tracking-tight">HR Control Center</h1>
-              <p className="text-slate-500 text-sm mt-1">
-                Review field document logs, pair site hours with contract rates, and stage verified payrolls.
-              </p>
+              <p className="text-[11px] uppercase tracking-[0.18em] font-bold text-indigo-300">HR & Workforce Control</p>
+              <h1 className="mt-2 text-2xl sm:text-3xl font-black">Review attendance. Manage employees. Protect the payroll gate.</h1>
+              <p className="mt-2 text-sm text-slate-400 max-w-2xl">Site Clerks submit verified paper-backed rosters here. HR approves or rejects them before Accountant can use the attendance for payroll.</p>
             </div>
-            <Link
-              href="/dashboard/hr/employees"
-              className="inline-flex items-center justify-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-sm px-5 py-3 rounded-2xl transition shadow-md shadow-indigo-600/20 active:scale-95 shrink-0"
-            >
-              <FolderOpen className="w-4 h-4" />
-              <span>Manage Employee Files</span>
-            </Link>
-          </div>
+            <Link href="/dashboard/hr/employees" className="inline-flex items-center justify-center gap-2 rounded-2xl bg-indigo-600 px-5 py-3 text-sm font-bold hover:bg-indigo-500 shrink-0"><Users className="w-4 h-4" />Manage Employees</Link>
+          </section>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-            {statsList.map((stat) => {
-              const Icon = stat.icon;
-              return (
-                <Link
-                  key={stat.name}
-                  href={stat.href}
-                  className="bg-white p-5 rounded-3xl border border-slate-200/80 shadow-xs hover:border-indigo-300 transition group flex flex-col justify-between space-y-4"
-                >
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs font-bold text-slate-500">{stat.name}</span>
-                    <div className={`p-2.5 rounded-2xl ${stat.color} text-white shadow-xs group-hover:scale-110 transition-transform`}>
-                      <Icon className="w-5 h-5" />
-                    </div>
-                  </div>
-                  <div>
-                    {loading ? (
-                      <Loader2 className="w-5 h-5 animate-spin text-slate-400 my-1" />
-                    ) : (
-                      <div className="text-3xl font-black text-slate-900">{stat.value}</div>
-                    )}
-                    <p className="text-[11px] font-semibold text-slate-400 mt-1">{stat.change}</p>
-                  </div>
-                </Link>
-              );
-            })}
-          </div>
+          {error && <div className="rounded-2xl border border-rose-200 bg-rose-50 p-4 flex items-center justify-between gap-3 text-sm font-semibold text-rose-700"><span className="flex items-center gap-2"><AlertTriangle className="w-4 h-4" />{error}</span><button onClick={load} className="rounded-xl bg-white border border-rose-200 px-3 py-2 text-xs flex items-center gap-2"><RefreshCw className="w-4 h-4" />Retry</button></div>}
 
-          {/* SITE CLERK INCOMING TIMESHEETS SECTION */}
-          <div className="bg-white p-6 rounded-3xl border border-slate-200/80 shadow-xs space-y-4">
-            <div className="flex items-center justify-between">
-              <div>
-                <h2 className="text-lg font-black text-slate-900 flex items-center gap-2">
-                  <FileText className="w-5 h-5 text-indigo-600" />
-                  <span>Incoming Site Clerk Submissions</span>
-                </h2>
-                <p className="text-xs text-slate-500 mt-0.5">
-                  Field rosters submitted by Site Clerks awaiting HR verification.
-                </p>
-              </div>
-              <span className="px-3 py-1 rounded-full text-xs font-extrabold bg-indigo-50 text-indigo-700 border border-indigo-100">
-                {data?.pendingRosters?.length || 0} Batches Pending
-              </span>
+          <section className="grid grid-cols-2 xl:grid-cols-4 gap-3 sm:gap-4">
+            <Metric title="Active Employees" value={stats.active_employees ?? 0} icon={Users} />
+            <Metric title="Waiting for HR" value={stats.pending_rosters ?? 0} icon={ClipboardCheck} warn={Number(stats.pending_rosters || 0) > 0} />
+            <Metric title="Approved Rosters" value={stats.approved_rosters ?? 0} icon={CheckCircle2} />
+            <Metric title="Rejected Rosters" value={stats.rejected_rosters ?? 0} icon={XCircle} />
+          </section>
+
+          <section className="rounded-3xl border border-slate-200 bg-white shadow-sm overflow-hidden">
+            <div className="p-5 sm:p-6 border-b border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div><h2 className="text-lg font-black">Rosters Waiting for Review</h2><p className="text-xs text-slate-500 mt-1">All active sites feed into this queue. Site selection is a filter, not an authority boundary.</p></div>
+              <Link href="/dashboard/hr/rosters" className="inline-flex items-center gap-2 text-sm font-bold text-indigo-600">Open full queue <ArrowRight className="w-4 h-4" /></Link>
             </div>
 
             {loading ? (
-              <div className="p-8 text-center text-xs text-slate-400 flex items-center justify-center gap-2">
-                <Loader2 className="w-4 h-4 animate-spin" /> Fetching submitted site rosters...
-              </div>
-            ) : !data?.pendingRosters || data.pendingRosters.length === 0 ? (
-              <div className="p-8 text-center bg-slate-50 rounded-2xl border border-dashed border-slate-200 text-xs text-slate-500 font-medium">
-                No site clerk submissions pending review.
-              </div>
+              <div className="p-16 flex items-center justify-center gap-2 text-sm text-slate-500"><Loader2 className="w-5 h-5 animate-spin text-indigo-600" />Loading submitted rosters...</div>
+            ) : pending.length === 0 ? (
+              <div className="p-12 text-center"><CheckCircle2 className="w-9 h-9 text-emerald-500 mx-auto" /><h3 className="mt-3 font-black">Nothing waiting for HR</h3><p className="mt-1 text-sm text-slate-500">New Site Clerk submissions will appear here automatically.</p></div>
             ) : (
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-2">
-                {data.pendingRosters.map((roster) => (
-                  <div key={roster.id} className="p-4 rounded-2xl border border-slate-200 bg-slate-50/50 hover:bg-white hover:border-indigo-200 transition space-y-3">
-                    <div className="flex items-start justify-between">
-                      <div className="flex items-center gap-2">
-                        <div className="p-2 bg-indigo-100 text-indigo-700 rounded-xl">
-                          <Building2 className="w-4 h-4" />
-                        </div>
-                        <div>
-                          <h4 className="font-bold text-slate-900 text-sm">{roster.site_name}</h4>
-                          <span className="text-[11px] text-slate-500 font-medium">{roster.shift_date}</span>
-                        </div>
+              <div className="divide-y divide-slate-100">
+                {pending.map((roster) => {
+                  const status = STATUS[roster.status] || STATUS.submitted_to_hr;
+                  return (
+                    <div key={roster.id} className="p-5 sm:p-6 flex flex-col lg:flex-row lg:items-center justify-between gap-4 hover:bg-slate-50/60">
+                      <div className="flex items-start gap-3">
+                        <div className="rounded-2xl bg-indigo-50 p-3 text-indigo-600"><Building2 className="w-5 h-5" /></div>
+                        <div><div className="flex flex-wrap items-center gap-2"><h3 className="font-black">{roster.site_name}</h3><span className={`rounded-full border px-2.5 py-1 text-[10px] font-bold ${status.className}`}>{status.label}</span></div><p className="mt-1 text-xs text-slate-500">{roster.shift_date} • Version {roster.version} • submitted by {roster.submitted_by_name}</p></div>
                       </div>
-                      <span className="px-2.5 py-0.5 rounded-full text-[10px] font-extrabold bg-amber-50 text-amber-700 border border-amber-200 uppercase">
-                        {roster.status}
-                      </span>
+                      <div className="grid grid-cols-3 gap-2 min-w-[300px] text-center">
+                        <Mini label="Workers" value={roster.total_workers} />
+                        <Mini label="Regular" value={`${roster.total_regular_hours}h`} />
+                        <Mini label="OT" value={`${roster.total_overtime_hours}h`} />
+                      </div>
+                      <Link href={`/dashboard/hr/rosters/${roster.id}`} className="inline-flex items-center justify-center gap-2 rounded-xl bg-indigo-600 px-4 py-2.5 text-xs font-bold text-white hover:bg-indigo-700">Review Roster <ArrowRight className="w-4 h-4" /></Link>
                     </div>
-
-                    <div className="grid grid-cols-3 gap-2 text-center py-2 bg-white rounded-xl border border-slate-100 text-xs">
-                      <div>
-                        <span className="block text-[10px] text-slate-400 font-medium">Workers</span>
-                        <span className="font-extrabold text-slate-800">{roster.total_workers}</span>
-                      </div>
-                      <div>
-                        <span className="block text-[10px] text-slate-400 font-medium">Reg Hours</span>
-                        <span className="font-extrabold text-slate-800">{roster.total_regular_hours}h</span>
-                      </div>
-                      <div>
-                        <span className="block text-[10px] text-slate-400 font-medium">OT Hours</span>
-                        <span className="font-extrabold text-amber-600">{roster.total_overtime_hours}h</span>
-                      </div>
-                    </div>
-
-                    <div className="flex items-center justify-between pt-1">
-                      {roster.timesheet_file_url ? (
-                        <a
-                          href={roster.timesheet_file_url}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="text-xs text-indigo-600 font-bold hover:underline inline-flex items-center gap-1"
-                        >
-                          View Attachment <ExternalLink className="w-3 h-3" />
-                        </a>
-                      ) : (
-                        <span className="text-xs text-slate-400 italic">No document attached</span>
-                      )}
-
-                      <Link
-                        href={`/dashboard/hr/absences?site=${encodeURIComponent(roster.site_name)}&date=${roster.shift_date}`}
-                        className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold rounded-xl transition inline-flex items-center gap-1.5 shadow-xs"
-                      >
-                        Review Roster <ArrowRight className="w-3.5 h-3.5" />
-                      </Link>
-                    </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             )}
-          </div>
-
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-            <div className="lg:col-span-2 space-y-6">
-              <div className="bg-white p-6 rounded-3xl border border-slate-200/80 shadow-xs space-y-4">
-                <div className="flex items-center justify-between">
-                  <h2 className="text-lg font-black text-slate-900 flex items-center gap-2">
-                    <AlertCircle className="w-5 h-5 text-indigo-600" />
-                    <span>Immediate Action Required</span>
-                  </h2>
-                  <span className="text-xs font-bold text-slate-400">
-                    {data?.pendingQueue?.length || 0} Pending
-                  </span>
-                </div>
-
-                {loading ? (
-                  <div className="p-8 text-center text-xs text-slate-400 flex items-center justify-center gap-2">
-                    <Loader2 className="w-4 h-4 animate-spin" /> Fetching live database shift logs...
-                  </div>
-                ) : !data?.pendingQueue || data.pendingQueue.length === 0 ? (
-                  <div className="p-8 text-center bg-slate-50 rounded-2xl border border-dashed border-slate-200 text-xs text-slate-500 font-medium">
-                    ✨ No pending compliance reviews! All field logs are verified.
-                  </div>
-                ) : (
-                  <div className="divide-y divide-slate-100">
-                    {data.pendingQueue.map((item) => (
-                      <div key={item.id} className="py-4 first:pt-0 last:pb-0 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                        <div className="space-y-1">
-                          <div className="flex items-center gap-2">
-                            <span className="font-bold text-slate-900 text-sm">{item.worker}</span>
-                            <span className="px-2.5 py-0.5 rounded-full text-[10px] font-extrabold bg-amber-50 text-amber-700 border border-amber-200 uppercase">
-                              {item.status}
-                            </span>
-                          </div>
-                          <p className="text-xs text-slate-500 font-medium">
-                            {item.type} • <span className="text-slate-700">{item.site}</span>
-                          </p>
-                        </div>
-                        <div className="flex items-center gap-3">
-                          <span className="text-[11px] text-slate-400 font-medium flex items-center gap-1">
-                            <Clock className="w-3.5 h-3.5" />
-                            {item.date}
-                          </span>
-                          <button
-                            onClick={() => handleApproveShift(item.id)}
-                            disabled={actioningId === item.id}
-                            className="px-3 py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 text-xs font-bold rounded-xl transition cursor-pointer flex items-center gap-1.5 disabled:opacity-50"
-                          >
-                            {actioningId === item.id ? (
-                              <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                            ) : (
-                              <>
-                                Verify Log <ArrowRight className="w-3.5 h-3.5" />
-                              </>
-                            )}
-                          </button>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            </div>
-
-            <div className="bg-gradient-to-br from-indigo-900 to-slate-900 text-white p-6 rounded-3xl shadow-xl flex flex-col justify-between space-y-6">
-              <div className="space-y-3">
-                <div className="p-3 bg-indigo-500/20 border border-indigo-400/30 rounded-2xl w-fit text-indigo-300">
-                  <CheckCircle2 className="w-6 h-6" />
-                </div>
-                <h3 className="text-xl font-black">Payroll Staging Gate</h3>
-                <p className="text-indigo-200/80 text-xs leading-relaxed">
-                  Verified site hours paired with contracts feed into Finance draft payrolls upon staging approval.
-                </p>
-              </div>
-
-              <div className="space-y-3 pt-4 border-t border-indigo-800/60">
-                <div className="flex justify-between text-xs font-bold text-indigo-200">
-                  <span>Current Period Readiness</span>
-                  <span>{loading ? '...' : `${readinessValue}%`}</span>
-                </div>
-                <div className="w-full bg-indigo-950 rounded-full h-2 overflow-hidden border border-indigo-800/50">
-                  <div 
-                    className="bg-emerald-400 h-full rounded-full transition-all duration-500" 
-                    style={{ width: `${readinessValue}%` }}
-                  ></div>
-                </div>
-                <Link
-                  href="/dashboard/hr/staging"
-                  className="w-full mt-2 inline-flex items-center justify-center gap-2 bg-indigo-500 hover:bg-indigo-400 text-white font-bold text-xs py-3 rounded-2xl transition active:scale-95"
-                >
-                  <span>Open Staging Queue</span>
-                  <ArrowRight className="w-4 h-4" />
-                </Link>
-              </div>
-            </div>
-          </div>
+          </section>
         </main>
       </div>
     </div>
   );
+}
+
+function Metric({ title, value, icon: Icon, warn = false }) {
+  return <div className="rounded-2xl border border-slate-200 bg-white p-4 sm:p-5 shadow-sm flex items-center justify-between gap-3"><div><p className="text-[10px] sm:text-xs font-bold uppercase tracking-wider text-slate-500">{title}</p><p className={`mt-1 text-2xl font-black ${warn ? 'text-amber-700' : 'text-slate-950'}`}>{value}</p></div><div className={`rounded-xl p-3 ${warn ? 'bg-amber-50 text-amber-600' : 'bg-indigo-50 text-indigo-600'}`}><Icon className="w-5 h-5" /></div></div>;
+}
+
+function Mini({ label, value }) {
+  return <div className="rounded-xl bg-slate-50 border border-slate-100 px-3 py-2"><div className="text-[10px] uppercase tracking-wider text-slate-400 font-bold">{label}</div><div className="mt-1 text-sm font-black text-slate-800">{value}</div></div>;
 }
