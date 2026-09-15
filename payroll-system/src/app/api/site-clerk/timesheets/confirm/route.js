@@ -28,6 +28,16 @@ export async function POST(request) {
       return NextResponse.json({ success: false, error: 'Review and confirm every assigned worker before continuing.' }, { status: 400 });
     }
 
+    const employeeIds = entries.map((entry) => entry.employee_id).filter(Boolean);
+    if (new Set(employeeIds).size !== employeeIds.length) {
+      return NextResponse.json({ success: false, error: 'A worker cannot appear more than once in the verification.' }, { status: 400 });
+    }
+
+    const sourceRowIds = entries.map((entry) => entry.extracted_row_id).filter(Boolean);
+    if (new Set(sourceRowIds).size !== sourceRowIds.length) {
+      return NextResponse.json({ success: false, error: 'The same paper row cannot be assigned to more than one worker.' }, { status: 400 });
+    }
+
     for (const entry of entries) {
       if (!entry.employee_id || !['present', 'absent', 'leave', 'sick'].includes(entry.attendance_state)) {
         return NextResponse.json({ success: false, error: 'Every worker needs a valid attendance status.' }, { status: 400 });
