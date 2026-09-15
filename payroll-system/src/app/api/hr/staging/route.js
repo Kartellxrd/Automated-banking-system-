@@ -1,49 +1,25 @@
 import { NextResponse } from 'next/server';
+import { requireHR } from '@/lib/auth/requireHR';
 
-let stagingBatches = [
-  {
-    id: 'STG-101',
-    workerName: 'Kago Phuthego',
-    workerId: 'EMP-8802',
-    site: 'Jwaneng Pit B',
-    jobTitle: 'Heavy Machinery Operator',
-    regularHours: 160,
-    otHours: 8,
-    grossPayBWP: 21120.00,
-    status: 'Ready for Approval',
-    period: '01 Aug - 15 Aug 2026',
-  },
-  {
-    id: 'STG-102',
-    workerName: 'Thabo Mokoena',
-    workerId: 'EMP-4105',
-    site: 'Orapa Shaft 3',
-    jobTitle: 'Underground Blaster',
-    regularHours: 160,
-    otHours: 20,
-    grossPayBWP: 28050.00,
-    status: 'Ready for Approval',
-    period: '01 Aug - 15 Aug 2026',
-  },
-];
-
-export async function GET() {
-  return NextResponse.json({ success: true, data: stagingBatches }, { status: 200 });
+function movedResponse() {
+  return NextResponse.json(
+    {
+      success: false,
+      error: 'HR payroll staging was retired. HR now ends at roster approval; Accountant prepares payroll from HR-approved attendance.',
+      moved_to: '/dashboard/hr/rosters',
+    },
+    { status: 410 }
+  );
 }
 
-export async function POST(request) {
-  try {
-    const { batchIds } = await request.json(); // Array of IDs e.g. ['STG-101', 'STG-102']
+export async function GET() {
+  const access = await requireHR('rosters.review');
+  if (!access.ok) return NextResponse.json({ success: false, error: access.error }, { status: access.status });
+  return movedResponse();
+}
 
-    stagingBatches = stagingBatches.map((item) =>
-      batchIds.includes(item.id) ? { ...item, status: 'Approved' } : item
-    );
-
-    return NextResponse.json(
-      { success: true, message: `Approved ${batchIds.length} staging records.` },
-      { status: 200 }
-    );
-  } catch (error) {
-    return NextResponse.json({ success: false, error: 'Failed to authorize staging batch' }, { status: 400 });
-  }
+export async function POST() {
+  const access = await requireHR('rosters.approve');
+  if (!access.ok) return NextResponse.json({ success: false, error: access.error }, { status: access.status });
+  return movedResponse();
 }
