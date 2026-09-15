@@ -7,7 +7,6 @@ import HRSideNav from '@/components/hr/HRSideNav';
 import HRNavbar from '@/components/hr/HRNavbar';
 
 const EMPTY_FORM = {
-  employee_code: '',
   first_name: '',
   last_name: '',
   national_id: '',
@@ -66,7 +65,6 @@ export default function HREmployeesPage() {
 
   function openEdit(employee) {
     setForm({
-      employee_code: employee.employee_code || '',
       first_name: employee.first_name || '',
       last_name: employee.last_name || '',
       national_id: employee.national_id || '',
@@ -140,8 +138,8 @@ export default function HREmployeesPage() {
           <div className="w-full max-w-2xl rounded-3xl bg-white shadow-2xl max-h-[92vh] overflow-y-auto">
             <div className="p-5 border-b border-slate-100 flex items-center justify-between"><div><h2 className="font-black text-lg">{modal.type === 'create' ? 'Add Employee' : 'Edit Employee'}</h2><p className="text-xs text-slate-500 mt-1">Sites come from Admin-created active sites. HR cannot create a new site here.</p></div><button onClick={() => setModal(null)} className="p-2 rounded-xl hover:bg-slate-100 text-slate-500"><X className="w-5 h-5" /></button></div>
             <form onSubmit={saveEmployee} className="p-5 space-y-5">
+              {modal.type === 'create' && <div className="rounded-2xl border border-emerald-100 bg-emerald-50 p-4 text-xs text-emerald-800"><strong>Employee code:</strong> assigned automatically by the system in the standard <code>EMP-####</code> format. HR does not type or reuse employee codes.</div>}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                {modal.type === 'create' && <Field label="Employee Code (optional)" value={form.employee_code} onChange={(value) => setForm({ ...form, employee_code: value })} placeholder="Auto-generated if blank" />}
                 <Field label="National ID / Omang" value={form.national_id} onChange={(value) => setForm({ ...form, national_id: value })} />
                 <Field required label="First Name" value={form.first_name} onChange={(value) => setForm({ ...form, first_name: value })} />
                 <Field required label="Last Name" value={form.last_name} onChange={(value) => setForm({ ...form, last_name: value })} />
