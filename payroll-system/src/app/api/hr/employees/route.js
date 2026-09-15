@@ -9,7 +9,7 @@ function normalizeOptional(value) {
 }
 
 async function buildEmployeePayload(db) {
-  const [employeesResult, sitesResult, assignmentsResult, contractsResult, documentsResult] = await Promise.all([
+  const [employeesResult, sitesResult, assignmentsResult, contractsResult, documentsResult, payoutResult] = await Promise.all([
     db.from('employees')
       .select('id, employee_code, first_name, last_name, national_id, phone, email, job_role, hourly_rate, status, created_at, updated_at')
       .order('last_name')
@@ -18,9 +18,10 @@ async function buildEmployeePayload(db) {
     db.from('employee_site_assignments').select('employee_id, site_id, assigned_at').eq('is_active', true),
     db.from('employment_contracts').select('id, employee_id, site_id, job_title, hourly_rate, effective_date, contract_type, pay_rate_type').eq('is_current', true),
     db.from('employee_documents').select('employee_id, id, document_type, expiry_date, document_status, is_current').eq('is_current', true),
+    db.from('employee_payout_profiles').select('employee_id, verified_at').eq('is_primary', true),
   ]);
 
-  for (const result of [employeesResult, sitesResult, assignmentsResult, contractsResult, documentsResult]) {
+  for (const result of [employeesResult, sitesResult, assignmentsResult, contractsResult, documentsResult, payoutResult]) {
     if (result.error) throw result.error;
   }
 
@@ -28,6 +29,7 @@ async function buildEmployeePayload(db) {
   const siteMap = new Map(sites.map((site) => [site.id, site]));
   const assignmentMap = new Map((assignmentsResult.data || []).map((row) => [row.employee_id, row]));
   const contractMap = new Map((contractsResult.data || []).map((row) => [row.employee_id, row]));
+  const payoutMap = new Map((payoutResult.data || []).map((row) => [row.employee_id, row]));
   const documentMap = new Map();
   for (const document of documentsResult.data || []) {
     const list = documentMap.get(document.employee_id) || [];
@@ -41,13 +43,18 @@ async function buildEmployeePayload(db) {
     const site = assignment ? siteMap.get(assignment.site_id) || null : null;
     const contract = contractMap.get(employee.id) || null;
     const documents = documentMap.get(employee.id) || [];
+    const payout = payoutMap.get(employee.id) || null;
+    const documentTypes = new Set(documents.map((document) => document.document_type));
     const expiredDocuments = documents.filter((document) => document.expiry_date && document.expiry_date < today).length;
 
     const compliance = [];
     if (!site && employee.status === 'Active') compliance.push('No active site assignment');
     if (!employee.job_role || employee.job_role === 'Unassigned') compliance.push('Job role missing');
     if (employee.hourly_rate === null || employee.hourly_rate === undefined) compliance.push('Hourly rate missing');
+    if (!documentTypes.has('omang') && !documentTypes.has('passport')) compliance.push('ID / passport copy missing');
+    if (!documentTypes.has('contract')) compliance.push('Employment contract copy missing');
     if (expiredDocuments > 0) compliance.push(`${expiredDocuments} expired document${expiredDocuments === 1 ? '' : 's'}`);
+    if (!payout?.verified_at) compliance.push('Verified payout details missing');
 
     return {
       ...employee,
@@ -58,6 +65,7 @@ async function buildEmployeePayload(db) {
       current_contract: contract ? { ...contract, hourly_rate: Number(contract.hourly_rate || 0) } : null,
       document_count: documents.length,
       expired_document_count: expiredDocuments,
+      payout_verified: Boolean(payout?.verified_at),
       compliance_alerts: compliance,
     };
   });
