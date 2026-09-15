@@ -1,641 +1,350 @@
 'use client';
 
-import { useState, useEffect, Suspense } from 'react';
-import { useSearchParams, useRouter } from 'next/navigation';
-import { 
-  UploadCloud, 
-  FileText, 
-  CheckCircle2, 
-  Loader2, 
-  Eye, 
-  ArrowLeft,
-  Send,
-  Calendar,
-  Users,
-  AlertTriangle,
-  MapPin,
-  Printer,
-  Download,
-  ExternalLink
-} from 'lucide-react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
+import {
+  AlertTriangle,
+  ArrowLeft,
+  Check,
+  CheckCircle2,
+  ExternalLink,
+  FileSearch,
+  FileText,
+  Loader2,
+  Send,
+  ShieldCheck,
+  UploadCloud,
+  XCircle,
+} from 'lucide-react';
 import SiteClerkSideNav from '@/components/site-clerk/SiteClerkSideNav';
 import SiteClerkNavbar from '@/components/site-clerk/SiteClerkNavbar';
-import { generateTimesheetPDF } from '@/lib/generateTimesheetPDF';
 
-function UploadContent() {
-  const router = useRouter();
-  const searchParams = useSearchParams();
-  const initialSiteParam = searchParams.get('site') || '';
+const ATTENDANCE_OPTIONS = [
+  { value: '', label: 'Choose status' },
+  { value: 'present', label: 'Present' },
+  { value: 'absent', label: 'Absent' },
+  { value: 'sick', label: 'Sick' },
+  { value: 'leave', label: 'Leave' },
+];
 
-  const [sites, setSites] = useState([]);
-  const [sitesLoading, setSitesLoading] = useState(true);
-  const [activeSite, setActiveSite] = useState(initialSiteParam);
+function dateTimeToClock(value) {
+  if (!value) return '';
+  try {
+    const parts = new Intl.DateTimeFormat('en-GB', {
+      timeZone: 'Africa/Gaborone',
+      hour: '2-digit',
+      minute: '2-digit',
+      hourCycle: 'h23',
+    }).formatToParts(new Date(value));
+    const hour = parts.find((part) => part.type === 'hour')?.value;
+    const minute = parts.find((part) => part.type === 'minute')?.value;
+    return hour && minute ? `${hour}:${minute}` : '';
+  } catch {
+    return '';
+  }
+}
 
-  const [shiftDate, setShiftDate] = useState('2026-08-24');
+function percent(value) {
+  const n = Number(value);
+  return Number.isFinite(n) ? `${Math.round(n * 100)}%` : '—';
+}
+
+export default function TimesheetUploadPage() {
+  const [data, setData] = useState(null);
+  const [date, setDate] = useState('');
+  const [entries, setEntries] = useState({});
   const [selectedFile, setSelectedFile] = useState(null);
-  const [filePreviewUrl, setFilePreviewUrl] = useState(null);
-  const [documentUrl, setDocumentUrl] = useState(null);
-  
+  const [localPreview, setLocalPreview] = useState(null);
+  const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
-  const [committing, setCommitting] = useState(false);
-  const [exportingPdf, setExportingPdf] = useState(false);
-  const [fetchingExisting, setFetchingExisting] = useState(false);
-  
-  const [parsedData, setParsedData] = useState(null);
-  const [submitSuccess, setSubmitSuccess] = useState(false);
-  const [siteMismatchCount, setSiteMismatchCount] = useState(0);
+  const [confirming, setConfirming] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [dragging, setDragging] = useState(false);
+  const [message, setMessage] = useState({ type: '', text: '' });
+  const fileInputRef = useRef(null);
 
-  // 1. Fetch Dynamic Sites List
-  useEffect(() => {
-    async function fetchSites() {
-      try {
-        setSitesLoading(true);
-        const res = await fetch('/api/site-clerk/dashboard');
-        const data = await res.json();
-
-        if (res.ok && data.sites?.length > 0) {
-          setSites(data.sites);
-          if (!initialSiteParam) {
-            const defaultSite = data.selectedSite || data.sites[0].name;
-            setActiveSite(defaultSite);
-          }
-        }
-      } catch (err) {
-        console.error('Error connecting to sites API:', err);
-      } finally {
-        setSitesLoading(false);
-      }
+  const initialiseEntries = useCallback((payload) => {
+    const next = {};
+    for (const worker of payload?.workers || []) {
+      const source = worker.suggested_row;
+      const attendance = worker.attendance;
+      next[worker.id] = {
+        employee_id: worker.id,
+        extracted_row_id: source?.id || '',
+        attendance_state: attendance?.attendance_state || (source?.extracted_clock_in && source?.extracted_clock_out ? 'present' : ''),
+        clock_in: attendance ? dateTimeToClock(attendance.clock_in) : source?.extracted_clock_in?.slice(0, 5) || '',
+        clock_out: attendance ? dateTimeToClock(attendance.clock_out) : source?.extracted_clock_out?.slice(0, 5) || '',
+        overtime_hours: attendance?.overtime_hours ?? source?.extracted_overtime_hours ?? 0,
+        notes: attendance?.supervisor_notes || '',
+        reviewed: Boolean(attendance && payload?.upload?.processing_status === 'confirmed'),
+      };
     }
+    setEntries(next);
+  }, []);
 
-    fetchSites();
-  }, [initialSiteParam]);
-
-  // 2. Fetch Existing Uploaded Document and Log Data for activeSite & shiftDate
-  useEffect(() => {
-    if (!activeSite || !shiftDate) return;
-
-    async function fetchExistingTimesheet() {
-      try {
-        setFetchingExisting(true);
-        const res = await fetch(
-          `/api/site-clerk/timesheets?site=${encodeURIComponent(activeSite)}&date=${shiftDate}`
-        );
-        const data = await res.json();
-
-        if (res.ok && data.success) {
-          if (data.workers && data.workers.length > 0) {
-            setParsedData(data.workers);
-          }
-          if (data.documentUrl) {
-            setDocumentUrl(data.documentUrl);
-          } else {
-            setDocumentUrl(null);
-          }
-        }
-      } catch (err) {
-        console.error('Error loading stored timesheet:', err);
-      } finally {
-        setFetchingExisting(false);
-      }
-    }
-
-    fetchExistingTimesheet();
-  }, [activeSite, shiftDate]);
-
-  // Handle preview URL cleanup
-  useEffect(() => {
-    return () => {
-      if (filePreviewUrl && filePreviewUrl.startsWith('blob:')) {
-        URL.revokeObjectURL(filePreviewUrl);
-      }
-    };
-  }, [filePreviewUrl]);
-
-  const handleSiteChange = (newSite) => {
-    setActiveSite(newSite);
-    router.replace(`?site=${encodeURIComponent(newSite)}`);
-  };
-
-  const handleFileSelect = (e) => {
-    const file = e.target.files[0];
-    if (file) {
-      setSelectedFile(file);
-      setSubmitSuccess(false);
-
-      if (file.type.startsWith('image/')) {
-        const localUrl = URL.createObjectURL(file);
-        setFilePreviewUrl(localUrl);
-      } else {
-        setFilePreviewUrl(null);
-      }
-    }
-  };
-
-  const handleProcessUpload = async () => {
-    if (!selectedFile) return;
-
+  const loadWorkflow = useCallback(async (targetDate = '') => {
+    setLoading(true);
     try {
-      setUploading(true);
-      const formData = new FormData();
-      formData.append('file', selectedFile);
-      formData.append('siteName', activeSite);
-      formData.append('shiftDate', shiftDate);
+      const suffix = targetDate ? `?date=${encodeURIComponent(targetDate)}` : '';
+      const response = await fetch(`/api/site-clerk/timesheets${suffix}`, { cache: 'no-store' });
+      const result = await response.json();
+      if (!response.ok || !result.success) throw new Error(result.error || 'Could not load paper timesheet workflow.');
+      setData(result.data);
+      setDate(result.data.date);
+      initialiseEntries(result.data);
+    } catch (error) {
+      setMessage({ type: 'error', text: error.message });
+    } finally {
+      setLoading(false);
+    }
+  }, [initialiseEntries]);
 
-      const res = await fetch('/api/site-clerk/timesheets/upload', {
-        method: 'POST',
-        body: formData,
+  useEffect(() => { loadWorkflow(); }, [loadWorkflow]);
+  useEffect(() => () => { if (localPreview) URL.revokeObjectURL(localPreview); }, [localPreview]);
+
+  function chooseFile(file) {
+    if (!file) return;
+    if (!['image/jpeg', 'image/png', 'application/pdf'].includes(file.type)) {
+      setMessage({ type: 'error', text: 'Choose a JPG, PNG, or PDF file.' });
+      return;
+    }
+    if (file.size > 10 * 1024 * 1024) {
+      setMessage({ type: 'error', text: 'The file must be 10 MB or smaller.' });
+      return;
+    }
+    if (localPreview) URL.revokeObjectURL(localPreview);
+    setSelectedFile(file);
+    setLocalPreview(URL.createObjectURL(file));
+    setMessage({ type: '', text: '' });
+  }
+
+  async function uploadTimesheet() {
+    if (!selectedFile || !date) return;
+    setUploading(true);
+    setMessage({ type: '', text: '' });
+    try {
+      const form = new FormData();
+      form.append('file', selectedFile);
+      form.append('date', date);
+      const response = await fetch('/api/site-clerk/timesheets/upload', { method: 'POST', body: form });
+      const result = await response.json();
+      if (!response.ok || !result.success) throw new Error(result.error || 'Upload failed.');
+      setSelectedFile(null);
+      if (localPreview) URL.revokeObjectURL(localPreview);
+      setLocalPreview(null);
+      await loadWorkflow(date);
+      setMessage({
+        type: result.data.extraction_warning ? 'warning' : 'success',
+        text: result.data.extraction_warning
+          ? `Paper stored safely. Automatic extraction needs manual review: ${result.data.extraction_warning}`
+          : 'Paper uploaded and extracted. Review every worker before confirming.',
       });
-
-      const data = await res.json();
-
-      if (res.ok) {
-        const workers = data.parsedWorkers || [];
-        setParsedData(workers);
-        if (data.documentUrl) {
-          setDocumentUrl(data.documentUrl);
-        }
-
-        const mismatches = workers.filter(
-          (w) => w.assigned_site && w.assigned_site.toLowerCase() !== activeSite.toLowerCase()
-        ).length;
-        setSiteMismatchCount(mismatches);
-      } else {
-        alert(data.error || 'Failed to process timesheet upload.');
-      }
-    } catch (err) {
-      console.error('Error attaching file & fetching roster:', err);
+    } catch (error) {
+      setMessage({ type: 'error', text: error.message });
     } finally {
       setUploading(false);
     }
-  };
+  }
 
-  const calculateHoursFromTimes = (timeInStr, timeOutStr) => {
-    try {
-      if (!timeOutStr || timeOutStr === '--:--') return { reg: 0, ot: 0 };
-      const [outHours, outMins] = timeOutStr.split(':').map(Number);
-      if (isNaN(outHours)) return { reg: 8.0, ot: 0.0 };
+  function updateEntry(workerId, patch) {
+    setEntries((current) => ({
+      ...current,
+      [workerId]: { ...current[workerId], ...patch, reviewed: patch.reviewed ?? false },
+    }));
+  }
 
-      const finishDecimal = outHours + (outMins || 0) / 60;
-      const standardFinishDecimal = 16.0;
-
-      if (finishDecimal > standardFinishDecimal) {
-        const ot = Number((finishDecimal - standardFinishDecimal).toFixed(2));
-        return { reg: 8.0, ot };
-      }
-      return { reg: Number(Math.max(0, Math.min(finishDecimal - 7.0, 8.0)).toFixed(2)), ot: 0.0 };
-    } catch {
-      return { reg: 8.0, ot: 0.0 };
+  function applySourceRow(workerId, rowId) {
+    const row = (data?.extracted_rows || []).find((item) => item.id === rowId);
+    if (!row) {
+      updateEntry(workerId, { extracted_row_id: '', reviewed: false });
+      return;
     }
-  };
+    updateEntry(workerId, {
+      extracted_row_id: row.id,
+      attendance_state: row.extracted_clock_in && row.extracted_clock_out ? 'present' : '',
+      clock_in: row.extracted_clock_in?.slice(0, 5) || '',
+      clock_out: row.extracted_clock_out?.slice(0, 5) || '',
+      overtime_hours: row.extracted_overtime_hours ?? 0,
+      reviewed: false,
+    });
+  }
 
-  const handleWorkerChange = (id, field, value) => {
-    setParsedData((prev) =>
-      prev.map((worker) => {
-        if (worker.id !== id) return worker;
+  const validation = useMemo(() => {
+    const workers = data?.workers || [];
+    const problems = [];
+    const usedRows = new Set();
+    for (const worker of workers) {
+      const entry = entries[worker.id];
+      if (!entry?.attendance_state) problems.push(`${worker.employee_code || worker.first_name}: attendance status missing`);
+      if (entry?.attendance_state === 'present' && (!entry.clock_in || !entry.clock_out)) problems.push(`${worker.employee_code || worker.first_name}: clock-in/out missing`);
+      if (!entry?.reviewed) problems.push(`${worker.employee_code || worker.first_name}: not reviewed`);
+      if (entry?.extracted_row_id) {
+        if (usedRows.has(entry.extracted_row_id)) problems.push('One paper row is assigned to more than one worker');
+        usedRows.add(entry.extracted_row_id);
+      }
+    }
+    return { valid: workers.length > 0 && problems.length === 0, problems };
+  }, [data, entries]);
 
-        const updated = { ...worker, [field]: value };
-
-        if (field === 'status' && ['sick_leave', 'awol', 'on_leave'].includes(value)) {
-          updated.timeInStr = '--:--';
-          updated.timeOutStr = '--:--';
-          updated.regular_hours = 0;
-          updated.overtime_hours = 0;
-        }
-
-        if (field === 'timeOutStr') {
-          const { reg, ot } = calculateHoursFromTimes(updated.timeInStr, value);
-          updated.regular_hours = reg;
-          updated.overtime_hours = ot;
-        }
-
-        return updated;
-      })
-    );
-  };
-
-  const handleFinalSubmit = async () => {
-    if (!parsedData || parsedData.length === 0) return;
-
+  async function confirmVerification() {
+    if (!validation.valid || !data?.upload?.id) return;
+    setConfirming(true);
+    setMessage({ type: '', text: '' });
     try {
-      setCommitting(true);
-      const res = await fetch('/api/site-clerk/timesheets/confirm', {
+      const payloadEntries = (data.workers || []).map((worker) => entries[worker.id]);
+      const response = await fetch('/api/site-clerk/timesheets/confirm', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          parsedWorkers: parsedData,
-          siteName: activeSite,
-          shiftDate: shiftDate,
-          documentUrl: documentUrl || filePreviewUrl,
-        }),
+        body: JSON.stringify({ upload_id: data.upload.id, date, entries: payloadEntries }),
       });
-
-      const data = await res.json();
-
-      if (res.ok) {
-        setSubmitSuccess(true);
-        if (data.redirectUrl) {
-          router.push(data.redirectUrl);
-        }
-      } else {
-        alert(`Error locking shift logs: ${data.error}`);
-      }
-    } catch (err) {
-      console.error('Submission error:', err);
+      const result = await response.json();
+      if (!response.ok || !result.success) throw new Error(result.error || 'Could not confirm timesheet.');
+      await loadWorkflow(date);
+      setMessage({ type: 'success', text: result.message });
+    } catch (error) {
+      setMessage({ type: 'error', text: error.message });
     } finally {
-      setCommitting(false);
+      setConfirming(false);
     }
-  };
+  }
 
-  const handleExportPDF = async () => {
-    if (!parsedData || parsedData.length === 0) return;
+  async function submitRoster() {
+    if (!confirm('Submit this verified roster to HR? After submission it is locked unless HR rejects it.')) return;
+    setSubmitting(true);
+    setMessage({ type: '', text: '' });
     try {
-      setExportingPdf(true);
-      await generateTimesheetPDF({
-        siteName: activeSite,
-        shiftDate,
-        workers: parsedData,
-        totals: {
-          regularHours: totalRegHours,
-          overtimeHours: totalOtHours,
-          combinedHours: totalHoursCombined,
-        },
+      const response = await fetch('/api/site-clerk/roster', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ date }),
       });
-    } catch (err) {
-      console.error('Error exporting PDF:', err);
-      alert('Failed to generate PDF document.');
+      const result = await response.json();
+      if (!response.ok || !result.success) throw new Error(result.error || 'Could not submit roster to HR.');
+      await loadWorkflow(date);
+      setMessage({ type: 'success', text: 'Verified paper roster submitted to HR successfully.' });
+    } catch (error) {
+      setMessage({ type: 'error', text: error.message });
     } finally {
-      setExportingPdf(false);
+      setSubmitting(false);
     }
-  };
+  }
 
-  const totalRegHours = parsedData
-    ? parsedData.reduce((acc, w) => acc + (Number(w.regular_hours) || 0), 0)
-    : 0;
-  const totalOtHours = parsedData
-    ? parsedData.reduce((acc, w) => acc + (Number(w.overtime_hours) || 0), 0)
-    : 0;
-  const totalHoursCombined = totalRegHours + totalOtHours;
-
-  const activeDisplayUrl = filePreviewUrl || documentUrl;
+  const previewUrl = localPreview || data?.preview_url;
+  const previewMime = selectedFile?.type || data?.upload?.mime_type;
+  const locked = data?.roster && !['draft', 'rejected'].includes(data.roster.status);
+  const confirmed = data?.upload?.processing_status === 'confirmed';
+  const exceptionRows = (data?.extracted_rows || []).filter((row) => row.match_status !== 'matched');
+  const selectedSourceRows = new Set(Object.values(entries).map((entry) => entry.extracted_row_id).filter(Boolean));
 
   return (
     <div className="min-h-screen bg-slate-100 text-slate-900 flex flex-col lg:flex-row font-sans">
       <SiteClerkSideNav />
-
       <main className="flex-1 p-4 sm:p-6 lg:p-8 space-y-6 overflow-x-hidden">
-        <SiteClerkNavbar title="Timesheet Ingestion" siteName={activeSite || 'Loading...'} />
+        <SiteClerkNavbar title="Paper Timesheet Verification" siteName={data?.site?.site_name || 'Assigned Site'} />
 
-        <div className="bg-white border border-slate-200 rounded-2xl p-4 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-          <div className="flex items-center gap-2.5">
-            <div className="p-2 bg-indigo-50 text-indigo-600 rounded-xl">
-              <MapPin className="w-5 h-5" />
-            </div>
-            <div>
-              <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Active Location</p>
-              <p className="text-sm font-bold text-slate-800">{activeSite || 'Fetching site location...'}</p>
-            </div>
+        <div className="flex items-center justify-between gap-3 flex-wrap">
+          <Link href="/dashboard/site-clerk" className="inline-flex items-center gap-2 text-xs font-bold text-slate-600 hover:text-indigo-600"><ArrowLeft className="w-4 h-4" />Back to dashboard</Link>
+          <Link href={`/dashboard/site-clerk/roster?date=${encodeURIComponent(date || '')}`} className="inline-flex items-center gap-2 text-xs font-bold text-indigo-600">Open Daily Roster <FileText className="w-4 h-4" /></Link>
+        </div>
+
+        {message.text && (
+          <div className={`rounded-2xl border p-4 text-sm font-semibold flex gap-2 items-start ${message.type === 'success' ? 'bg-emerald-50 border-emerald-200 text-emerald-800' : message.type === 'warning' ? 'bg-amber-50 border-amber-200 text-amber-800' : 'bg-rose-50 border-rose-200 text-rose-800'}`}>
+            {message.type === 'success' ? <CheckCircle2 className="w-5 h-5 shrink-0" /> : <AlertTriangle className="w-5 h-5 shrink-0" />}{message.text}
           </div>
+        )}
 
-          <div className="flex items-center gap-2">
-            <span className="text-xs font-semibold text-slate-500 hidden md:inline">Switch Station:</span>
-            {sitesLoading ? (
-              <div className="flex items-center gap-2 text-xs text-slate-500 bg-slate-50 border border-slate-200 rounded-xl px-3 py-2">
-                <Loader2 className="w-3.5 h-3.5 animate-spin text-indigo-600" />
-                <span>Loading sites...</span>
-              </div>
-            ) : (
-              <select
-                value={activeSite}
-                onChange={(e) => handleSiteChange(e.target.value)}
-                className="text-xs font-bold bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-slate-800 outline-none focus:border-indigo-500 cursor-pointer"
-              >
-                {sites.map((site) => (
-                  <option key={site.id || site.name} value={site.name}>
-                    {site.name}
-                  </option>
-                ))}
-              </select>
+        {loading ? (
+          <div className="bg-white border border-slate-200 rounded-3xl py-24 flex items-center justify-center gap-2 text-sm text-slate-500"><Loader2 className="w-5 h-5 animate-spin text-indigo-600" />Loading paper-timesheet workflow...</div>
+        ) : data ? (
+          <>
+            <section className="bg-slate-950 text-white rounded-3xl p-5 sm:p-6 flex flex-col xl:flex-row xl:items-center justify-between gap-4">
+              <div><p className="text-[10px] uppercase tracking-[0.18em] text-indigo-300 font-bold">Locked Site Scope</p><h2 className="mt-1 text-xl font-black">{data.site.site_name}</h2><p className="text-sm text-slate-400 mt-1">{data.site.location || 'No location description'} • {data.summary.assigned_workers} active assigned workers</p></div>
+              <div className="flex flex-wrap items-center gap-3"><label className="text-xs font-bold text-slate-300">Work date</label><input type="date" value={date} disabled={uploading || confirming || locked} onChange={(e) => { setDate(e.target.value); loadWorkflow(e.target.value); }} className="rounded-xl bg-slate-900 border border-slate-700 px-3 py-2 text-xs text-white" /><span className={`rounded-full px-3 py-1.5 text-[10px] font-bold ${locked ? 'bg-emerald-500/20 text-emerald-300' : 'bg-amber-500/20 text-amber-300'}`}>{data.roster?.status || 'draft'}</span></div>
+            </section>
+
+            <section className="grid grid-cols-2 lg:grid-cols-5 gap-3">
+              <Stat label="Assigned" value={data.summary.assigned_workers} />
+              <Stat label="Paper Rows" value={data.summary.extracted_rows} />
+              <Stat label="Auto Matched" value={data.summary.auto_matched} good />
+              <Stat label="Needs Review" value={data.summary.needs_review + data.summary.unmatched_rows} warn />
+              <Stat label="Missing on Paper" value={data.summary.missing_workers} warn={data.summary.missing_workers > 0} />
+            </section>
+
+            {!locked && (
+              <section className="bg-white border border-slate-200 rounded-3xl p-5 sm:p-6 space-y-4">
+                <div className="flex items-center justify-between gap-4 flex-wrap"><div><h3 className="font-black text-slate-950">1. Upload physical attendance sheet</h3><p className="text-xs text-slate-500 mt-1">JPG, PNG or PDF • maximum 10 MB • stored privately and attached to this site's daily roster.</p></div>{data.upload && <span className="text-[10px] font-bold rounded-full bg-indigo-50 text-indigo-700 px-3 py-1.5">Latest: {data.upload.original_filename}</span>}</div>
+                <div onDragOver={(e) => { e.preventDefault(); setDragging(true); }} onDragLeave={() => setDragging(false)} onDrop={(e) => { e.preventDefault(); setDragging(false); chooseFile(e.dataTransfer.files?.[0]); }} onClick={() => fileInputRef.current?.click()} className={`cursor-pointer rounded-2xl border-2 border-dashed p-7 text-center transition ${dragging ? 'border-indigo-500 bg-indigo-50' : 'border-slate-300 bg-slate-50 hover:border-indigo-400'}`}>
+                  <input ref={fileInputRef} type="file" accept="image/jpeg,image/png,application/pdf" className="hidden" onChange={(e) => chooseFile(e.target.files?.[0])} />
+                  <UploadCloud className="w-8 h-8 mx-auto text-indigo-600" /><p className="mt-3 text-sm font-bold text-slate-800">{selectedFile ? selectedFile.name : 'Drop paper timesheet here or click to browse'}</p><p className="text-xs text-slate-400 mt-1">The file never chooses the site; your Admin assignment controls that.</p>
+                </div>
+                {selectedFile && <button onClick={uploadTimesheet} disabled={uploading} className="w-full sm:w-auto inline-flex items-center justify-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl px-5 py-3 text-xs font-bold disabled:opacity-50">{uploading ? <Loader2 className="w-4 h-4 animate-spin" /> : <FileSearch className="w-4 h-4" />}{uploading ? 'Uploading & extracting...' : 'Upload & Extract Paper'}</button>}
+              </section>
             )}
-          </div>
-        </div>
 
-        <div>
-          <Link
-            href="/dashboard/site-clerk"
-            className="inline-flex items-center gap-1.5 text-xs font-bold text-slate-600 hover:text-indigo-600 transition"
-          >
-            <ArrowLeft className="w-4 h-4" />
-            <span>Back to Field Overview</span>
-          </Link>
-        </div>
-
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-          <div className="lg:col-span-5 space-y-4">
-            <div className="bg-white border border-slate-200 rounded-3xl p-5 shadow-xs space-y-4">
-              <div>
-                <h3 className="text-sm font-bold text-slate-900">Attach Physical Sheet</h3>
-                <p className="text-xs text-slate-500 mt-0.5">
-                  Upload scanned JPEG, PNG, or PDF sheet for audit records ({activeSite}).
-                </p>
-              </div>
-
-              <div className="space-y-1">
-                <label className="text-[11px] font-bold text-slate-600 flex items-center gap-1">
-                  <Calendar className="w-3.5 h-3.5 text-indigo-600" /> Target Shift Date
-                </label>
-                <input
-                  type="date"
-                  value={shiftDate}
-                  onChange={(e) => setShiftDate(e.target.value)}
-                  className="w-full text-xs font-semibold bg-slate-50 border border-slate-200 rounded-xl p-2.5 outline-none focus:border-indigo-500 text-slate-800"
-                />
-              </div>
-
-              <label className="border-2 border-dashed border-slate-300 hover:border-indigo-500 bg-slate-50/50 hover:bg-slate-50 rounded-2xl p-6 flex flex-col items-center justify-center text-center cursor-pointer transition space-y-3 block">
-                <input
-                  type="file"
-                  accept="image/*,application/pdf"
-                  onChange={handleFileSelect}
-                  className="hidden"
-                />
-                <div className="p-3 bg-indigo-50 text-indigo-600 rounded-2xl">
-                  <UploadCloud className="w-8 h-8" />
+            {data.upload && (
+              <section className="grid grid-cols-1 xl:grid-cols-12 gap-5">
+                <div className="xl:col-span-5 bg-white border border-slate-200 rounded-3xl p-4 sm:p-5 space-y-4">
+                  <div className="flex items-center justify-between gap-3"><div><h3 className="font-black text-slate-950">2. Original paper evidence</h3><p className="text-xs text-slate-500 mt-1">Private signed preview. HR can later compare this paper with the digital roster.</p></div>{data.preview_url && <a href={data.preview_url} target="_blank" rel="noreferrer" className="p-2.5 rounded-xl border border-slate-200 text-slate-600 hover:text-indigo-600"><ExternalLink className="w-4 h-4" /></a>}</div>
+                  <div className="rounded-2xl overflow-hidden border border-slate-200 bg-slate-900 min-h-[520px] flex items-center justify-center">{previewUrl ? (previewMime === 'application/pdf' ? <iframe title="Paper timesheet" src={previewUrl} className="w-full h-[620px] bg-white" /> : <img src={previewUrl} alt="Uploaded paper timesheet" className="max-w-full max-h-[720px] object-contain" />) : <div className="text-slate-400 text-sm">No preview available.</div>}</div>
+                  {data.upload.extraction_error && <div className="rounded-xl bg-amber-50 border border-amber-200 p-3 text-xs text-amber-800"><b>Extraction warning:</b> {data.upload.extraction_error}. You can still enter the paper values manually.</div>}
+                  {(data.upload.detected_site_text || data.upload.detected_document_date) && <div className="grid grid-cols-2 gap-2 text-xs"><div className="rounded-xl bg-slate-50 border border-slate-200 p-3"><div className="text-slate-400 font-bold">Paper site text</div><div className="mt-1 font-semibold">{data.upload.detected_site_text || 'Not detected'}</div></div><div className="rounded-xl bg-slate-50 border border-slate-200 p-3"><div className="text-slate-400 font-bold">Paper date</div><div className="mt-1 font-semibold">{data.upload.detected_document_date || 'Not detected'}</div></div></div>}
                 </div>
-                <div>
-                  <p className="text-xs font-bold text-slate-800">
-                    {selectedFile ? selectedFile.name : 'Click to select or drag document'}
-                  </p>
-                  <p className="text-[11px] text-slate-400 mt-1">Maximum size: 10MB</p>
-                </div>
-              </label>
 
-              {selectedFile && (
-                <button
-                  onClick={handleProcessUpload}
-                  disabled={uploading}
-                  className="w-full flex items-center justify-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold py-3 rounded-xl transition shadow-xs disabled:opacity-50 cursor-pointer"
-                >
-                  {uploading ? (
-                    <>
-                      <Loader2 className="w-4 h-4 animate-spin" />
-                      <span>Uploading & Ingesting...</span>
-                    </>
-                  ) : (
-                    <>
-                      <Users className="w-4 h-4" />
-                      <span>Upload & Extract Data</span>
-                    </>
-                  )}
-                </button>
-              )}
-            </div>
-
-            {/* Restored Document Preview Panel */}
-            <div className="bg-white border border-slate-200 rounded-3xl p-4 shadow-xs space-y-3">
-              <div className="flex items-center justify-between text-xs font-bold text-slate-700">
-                <span className="flex items-center gap-1.5">
-                  <Eye className="w-4 h-4 text-indigo-600" /> Stored Preview ({activeSite})
-                </span>
-                <div className="flex items-center gap-2">
-                  <span className="text-[10px] font-mono text-slate-400 bg-slate-100 px-2 py-0.5 rounded">
-                    {shiftDate}
-                  </span>
-                  {activeDisplayUrl && (
-                    <a
-                      href={activeDisplayUrl}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="text-slate-500 hover:text-indigo-600"
-                      title="Open full preview"
-                    >
-                      <ExternalLink className="w-3.5 h-3.5" />
-                    </a>
-                  )}
-                </div>
-              </div>
-
-              <div className="rounded-2xl overflow-hidden border border-slate-200 bg-slate-900 flex items-center justify-center min-h-64 max-h-96 relative">
-                {fetchingExisting ? (
-                  <div className="text-center p-6 space-y-2">
-                    <Loader2 className="w-6 h-6 animate-spin text-white mx-auto" />
-                    <p className="text-xs text-slate-300">Fetching stored document...</p>
-                  </div>
-                ) : activeDisplayUrl ? (
-                  activeDisplayUrl.endsWith('.pdf') ? (
-                    <iframe
-                      src={activeDisplayUrl}
-                      className="w-full h-80"
-                      title="Uploaded PDF Timesheet"
-                    />
-                  ) : (
-                    <img
-                      src={activeDisplayUrl}
-                      alt={`Timesheet ${activeSite} ${shiftDate}`}
-                      className="object-contain w-full h-full max-h-80"
-                    />
-                  )
-                ) : (
-                  <div className="text-center p-6 space-y-2">
-                    <FileText className="w-8 h-8 text-slate-600 mx-auto" />
-                    <p className="text-xs text-slate-400 font-medium">No uploaded sheet found for this date</p>
-                    <p className="text-[10px] text-slate-500">Select an image or PDF file above to upload</p>
-                  </div>
-                )}
-              </div>
-            </div>
-          </div>
-
-          <div className="lg:col-span-7">
-            <div className="bg-white border border-slate-200 rounded-3xl p-5 shadow-xs space-y-5">
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 pb-4">
-                <div>
-                  <h3 className="text-sm font-bold text-slate-900">Shift Attendance Verification</h3>
-                  <p className="text-xs text-slate-500">
-                    Verify worker logs against attached paper sheet and adjust exceptions.
-                  </p>
-                </div>
-                <div className="flex items-center gap-2">
-                  {parsedData && (
-                    <button
-                      onClick={handleExportPDF}
-                      disabled={exportingPdf}
-                      className="inline-flex items-center gap-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold px-3 py-1.5 rounded-xl transition cursor-pointer disabled:opacity-50"
-                    >
-                      {exportingPdf ? (
-                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                      ) : (
-                        <Printer className="w-3.5 h-3.5" />
-                      )}
-                      <span>{exportingPdf ? 'Generating...' : 'Export PDF'}</span>
-                    </button>
-                  )}
-                  {parsedData && (
-                    <span className="text-xs font-bold bg-indigo-50 text-indigo-700 px-3 py-1.5 rounded-xl border border-indigo-200">
-                      {parsedData.length} Workers
-                    </span>
-                  )}
-                </div>
-              </div>
-
-              {siteMismatchCount > 0 && (
-                <div className="p-3 bg-amber-50 border border-amber-200 rounded-2xl flex items-center gap-2.5 text-xs text-amber-800 font-medium">
-                  <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0" />
-                  <span>
-                    <strong>{siteMismatchCount} worker(s)</strong> on this sheet are mapped to a different site than <strong>{activeSite}</strong>. Confirming will record them under this active station.
-                  </span>
-                </div>
-              )}
-
-              {submitSuccess ? (
-                <div className="p-6 bg-emerald-50 border border-emerald-200 rounded-2xl text-center space-y-3">
-                  <div className="p-3 bg-emerald-100 text-emerald-700 rounded-full w-12 h-12 flex items-center justify-center mx-auto">
-                    <CheckCircle2 className="w-6 h-6" />
-                  </div>
-                  <h4 className="text-base font-bold text-emerald-900">Timesheet Logs Locked</h4>
-                  <p className="text-xs text-emerald-700 max-w-md mx-auto">
-                    Redirecting to Roster Dashboard for final adjustments...
-                  </p>
-                </div>
-              ) : parsedData ? (
-                <div className="space-y-4">
-                  <div className="overflow-x-auto border border-slate-200 rounded-2xl">
-                    <table className="w-full text-left text-xs text-slate-700">
-                      <thead className="bg-slate-50 border-b border-slate-200 text-slate-500 font-bold uppercase tracking-wider text-[10px]">
-                        <tr>
-                          <th className="p-3">Worker Name</th>
-                          <th className="p-3">Time In</th>
-                          <th className="p-3">Time Out</th>
-                          <th className="p-3">Reg. Hours</th>
-                          <th className="p-3">OT Hours</th>
-                          <th className="p-3">Status / Exception</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-slate-100">
-                        {parsedData.map((worker) => {
-                          const isInactive = ['sick_leave', 'awol', 'on_leave'].includes(worker.status);
-                          return (
-                            <tr key={worker.id} className="hover:bg-slate-50/80 transition">
-                              <td className="p-3 font-semibold text-slate-900">
-                                <div>{worker.worker_name}</div>
-                                <div className="text-[10px] text-slate-400 font-normal">{worker.employee_code}</div>
-                              </td>
-                              <td className="p-3">
-                                <input
-                                  type="text"
-                                  disabled={isInactive}
-                                  value={worker.timeInStr || ''}
-                                  onChange={(e) => handleWorkerChange(worker.id, 'timeInStr', e.target.value)}
-                                  className="w-16 font-mono text-xs bg-slate-50 border border-slate-200 rounded p-1 text-center disabled:opacity-40"
-                                />
-                              </td>
-                              <td className="p-3">
-                                <input
-                                  type="text"
-                                  disabled={isInactive}
-                                  value={worker.timeOutStr || ''}
-                                  onChange={(e) => handleWorkerChange(worker.id, 'timeOutStr', e.target.value)}
-                                  className="w-16 font-mono text-xs bg-slate-50 border border-slate-200 rounded p-1 text-center disabled:opacity-40"
-                                />
-                              </td>
-                              <td className="p-3">
-                                <input
-                                  type="number"
-                                  disabled={isInactive}
-                                  value={worker.regular_hours ?? 0}
-                                  onChange={(e) => handleWorkerChange(worker.id, 'regular_hours', Number(e.target.value))}
-                                  className="w-12 font-bold text-xs bg-slate-50 border border-slate-200 rounded p-1 text-center disabled:opacity-40"
-                                />
-                              </td>
-                              <td className="p-3 font-bold text-amber-600">
-                                {worker.overtime_hours > 0 ? `+${worker.overtime_hours}h` : '0h'}
-                              </td>
-                              <td className="p-3">
-                                <select
-                                  value={worker.status || 'completed'}
-                                  onChange={(e) => handleWorkerChange(worker.id, 'status', e.target.value)}
-                                  className="text-xs font-bold bg-slate-50 border border-slate-200 rounded-lg p-1 text-slate-800 outline-none"
-                                >
-                                  <option value="completed">Completed</option>
-                                  <option value="late">Late</option>
-                                  <option value="sick_leave">Sick Leave</option>
-                                  <option value="awol">AWOL</option>
-                                  <option value="on_leave">On Leave</option>
-                                  <option value="iod">Injury (IOD)</option>
-                                </select>
-                              </td>
-                            </tr>
-                          );
-                        })}
-                      </tbody>
-                    </table>
-                  </div>
-
-                  {/* Summary Bar at Bottom */}
-                  <div className="grid grid-cols-3 gap-3 bg-slate-900 text-white rounded-2xl p-4 text-center">
-                    <div>
-                      <p className="text-[10px] font-bold text-slate-400 uppercase">Regular Hours</p>
-                      <p className="text-base font-bold">{totalRegHours.toFixed(1)}h</p>
-                    </div>
-                    <div className="border-x border-slate-800">
-                      <p className="text-[10px] font-bold text-slate-400 uppercase">Overtime Hours</p>
-                      <p className="text-base font-bold text-amber-400">+{totalOtHours.toFixed(1)}h</p>
-                    </div>
-                    <div>
-                      <p className="text-[10px] font-bold text-slate-400 uppercase">Total Shift Hours</p>
-                      <p className="text-base font-bold text-indigo-400">{totalHoursCombined.toFixed(1)}h</p>
-                    </div>
-                  </div>
-
-                  <div className="flex items-center justify-end gap-3 pt-2">
-                    <button
-                      onClick={() => setParsedData(null)}
-                      className="px-4 py-2.5 rounded-xl border border-slate-200 text-slate-600 hover:bg-slate-50 text-xs font-semibold transition cursor-pointer"
-                    >
-                      Re-select File
-                    </button>
-                    <button
-                      onClick={handleFinalSubmit}
-                      disabled={committing}
-                      className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold px-5 py-2.5 rounded-xl transition shadow-xs cursor-pointer disabled:opacity-50"
-                    >
-                      {committing ? (
-                        <>
-                          <Loader2 className="w-4 h-4 animate-spin" />
-                          <span>Saving to shift_logs...</span>
-                        </>
-                      ) : (
-                        <>
-                          <Send className="w-4 h-4" />
-                          <span>Confirm & Lock to Shift Logs</span>
-                        </>
-                      )}
-                    </button>
+                <div className="xl:col-span-7 bg-white border border-slate-200 rounded-3xl overflow-hidden">
+                  <div className="p-5 border-b border-slate-200"><h3 className="font-black text-slate-950">3. Verify every assigned worker</h3><p className="text-xs text-slate-500 mt-1">OCR is a suggestion only. Choose the paper row, correct values where needed, then tick Reviewed.</p></div>
+                  <div className="divide-y divide-slate-100">
+                    {(data.workers || []).map((worker) => {
+                      const entry = entries[worker.id] || {};
+                      const source = (data.extracted_rows || []).find((row) => row.id === entry.extracted_row_id);
+                      const present = entry.attendance_state === 'present';
+                      return (
+                        <div key={worker.id} className={`p-5 space-y-4 ${entry.reviewed ? 'bg-emerald-50/30' : ''}`}>
+                          <div className="flex items-start justify-between gap-3"><div><div className="font-black text-slate-950">{worker.first_name} {worker.last_name}</div><div className="text-[11px] text-slate-400 mt-0.5">{worker.employee_code || 'No employee code'} • {worker.job_role || 'Worker'}</div></div><MatchBadge row={source} /></div>
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                            <label className="text-[11px] font-bold text-slate-600">Paper source row<select disabled={locked || confirmed} value={entry.extracted_row_id || ''} onChange={(e) => applySourceRow(worker.id, e.target.value)} className="mt-1 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-xs font-semibold"><option value="">No paper match / enter manually</option>{(data.extracted_rows || []).map((row) => <option key={row.id} value={row.id} disabled={selectedSourceRows.has(row.id) && row.id !== entry.extracted_row_id}>Row {row.source_row_number}: {row.raw_employee_name || row.raw_employee_code || 'Unreadable worker'}</option>)}</select></label>
+                            <label className="text-[11px] font-bold text-slate-600">Attendance<select disabled={locked || confirmed} value={entry.attendance_state || ''} onChange={(e) => updateEntry(worker.id, { attendance_state: e.target.value, reviewed: false })} className="mt-1 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-xs font-semibold">{ATTENDANCE_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select></label>
+                          </div>
+                          {present && <div className="grid grid-cols-3 gap-2"><Field label="Clock in" type="time" disabled={locked || confirmed} value={entry.clock_in || ''} onChange={(value) => updateEntry(worker.id, { clock_in: value, reviewed: false })} /><Field label="Clock out" type="time" disabled={locked || confirmed} value={entry.clock_out || ''} onChange={(value) => updateEntry(worker.id, { clock_out: value, reviewed: false })} /><Field label="Manual OT (h)" type="number" disabled={locked || confirmed} value={entry.overtime_hours ?? 0} onChange={(value) => updateEntry(worker.id, { overtime_hours: value, reviewed: false })} /></div>}
+                          <label className="text-[11px] font-bold text-slate-600 block">Clerk note<input disabled={locked || confirmed} value={entry.notes || ''} onChange={(e) => updateEntry(worker.id, { notes: e.target.value, reviewed: false })} placeholder="Optional correction / paper note" className="mt-1 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-xs" /></label>
+                          <label className={`flex items-center gap-2 rounded-xl border px-3 py-2.5 text-xs font-bold ${entry.reviewed ? 'border-emerald-200 bg-emerald-50 text-emerald-700' : 'border-slate-200 bg-slate-50 text-slate-600'}`}><input type="checkbox" disabled={locked || confirmed || !entry.attendance_state || (present && (!entry.clock_in || !entry.clock_out))} checked={Boolean(entry.reviewed)} onChange={(e) => updateEntry(worker.id, { reviewed: e.target.checked })} /><ShieldCheck className="w-4 h-4" />I checked this worker against the paper.</label>
+                        </div>
+                      );
+                    })}
                   </div>
                 </div>
-              ) : (
-                <div className="p-12 border-2 border-dashed border-slate-200 rounded-2xl flex flex-col items-center justify-center text-center space-y-2">
-                  <div className="p-3 bg-slate-100 text-slate-400 rounded-2xl">
-                    <FileText className="w-8 h-8" />
-                  </div>
-                  <p className="text-xs font-bold text-slate-700">No Roster Loaded</p>
-                  <p className="text-[11px] text-slate-400 max-w-xs">
-                    Select a scanned timesheet photo on the left and click "Upload & Extract Data" to pull active workers for {activeSite || 'active site'}.
-                  </p>
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
+              </section>
+            )}
+
+            {data.upload && exceptionRows.length > 0 && (
+              <section className="rounded-3xl border border-amber-200 bg-amber-50 p-5"><h3 className="font-black text-amber-950 flex items-center gap-2"><AlertTriangle className="w-5 h-5" />Extraction exceptions</h3><p className="text-xs text-amber-800 mt-1">These paper rows were not confidently auto-matched. Map them with the Paper source row dropdown above, or enter the correct worker manually.</p><div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-2">{exceptionRows.map((row) => <div key={row.id} className="rounded-xl border border-amber-200 bg-white p-3 text-xs"><div className="font-bold">Row {row.source_row_number}: {row.raw_employee_name || row.raw_employee_code || 'Unreadable'}</div><div className="mt-1 text-slate-500">Match: {row.match_status} • confidence {percent(row.match_confidence)} • OCR {percent(row.ocr_confidence)}</div></div>)}</div></section>
+            )}
+
+            {data.upload && !locked && !confirmed && (
+              <section className="bg-white border border-slate-200 rounded-3xl p-5 flex flex-col md:flex-row md:items-center justify-between gap-4"><div><h3 className="font-black text-slate-950">4. Confirm paper verification</h3><p className="text-xs text-slate-500 mt-1">This writes reviewed values into the daily roster. It does not submit to HR yet.</p>{!validation.valid && <p className="text-xs text-amber-700 mt-2">{validation.problems.length} item{validation.problems.length === 1 ? '' : 's'} still need attention.</p>}</div><button onClick={confirmVerification} disabled={!validation.valid || confirming} className="inline-flex items-center justify-center gap-2 rounded-xl bg-indigo-600 text-white px-5 py-3 text-xs font-bold disabled:bg-slate-300">{confirming ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}{confirming ? 'Confirming...' : 'Confirm Verified Timesheet'}</button></section>
+            )}
+
+            {confirmed && !locked && (
+              <section className="rounded-3xl border border-emerald-200 bg-emerald-50 p-5 flex flex-col md:flex-row md:items-center justify-between gap-4"><div><h3 className="font-black text-emerald-950">5. Verification complete</h3><p className="text-xs text-emerald-800 mt-1">The paper and digital roster are linked. Inspect the Daily Roster once more, then submit it to HR.</p></div><div className="flex flex-wrap gap-2"><Link href={`/dashboard/site-clerk/roster?date=${encodeURIComponent(date)}`} className="rounded-xl border border-emerald-300 bg-white text-emerald-800 px-4 py-3 text-xs font-bold">Review Digital Roster</Link><button onClick={submitRoster} disabled={submitting} className="inline-flex items-center gap-2 rounded-xl bg-emerald-700 text-white px-5 py-3 text-xs font-bold disabled:opacity-50">{submitting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}{submitting ? 'Submitting...' : 'Submit Roster to HR'}</button></div></section>
+            )}
+
+            {locked && <section className="rounded-3xl border border-slate-200 bg-white p-5 flex items-center gap-3"><CheckCircle2 className="w-6 h-6 text-emerald-600" /><div><h3 className="font-black text-slate-950">Roster is locked</h3><p className="text-xs text-slate-500 mt-1">Status: {data.roster.status}. You cannot change it unless HR rejects it back for correction.</p></div></section>}
+          </>
+        ) : null}
       </main>
     </div>
   );
 }
 
-export default function TimesheetUploadPage() {
-  return (
-    <Suspense fallback={<div className="p-8 text-xs text-slate-500">Loading Ingestion Portal...</div>}>
-      <UploadContent />
-    </Suspense>
-  );
+function Stat({ label, value, good = false, warn = false }) {
+  return <div className="rounded-2xl border border-slate-200 bg-white p-4"><div className="text-[10px] uppercase tracking-wider font-bold text-slate-400">{label}</div><div className={`mt-1 text-2xl font-black ${good ? 'text-emerald-700' : warn ? 'text-amber-700' : 'text-slate-950'}`}>{value}</div></div>;
+}
+
+function MatchBadge({ row }) {
+  if (!row) return <span className="rounded-full bg-rose-50 text-rose-700 px-2.5 py-1 text-[10px] font-bold flex items-center gap-1"><XCircle className="w-3 h-3" />Missing / Manual</span>;
+  if (row.match_status === 'matched') return <span className="rounded-full bg-emerald-50 text-emerald-700 px-2.5 py-1 text-[10px] font-bold flex items-center gap-1"><CheckCircle2 className="w-3 h-3" />Matched {percent(row.match_confidence)}</span>;
+  return <span className="rounded-full bg-amber-50 text-amber-700 px-2.5 py-1 text-[10px] font-bold flex items-center gap-1"><AlertTriangle className="w-3 h-3" />Review {percent(row.match_confidence)}</span>;
+}
+
+function Field({ label, type, value, disabled, onChange }) {
+  return <label className="text-[11px] font-bold text-slate-600">{label}<input type={type} step={type === 'number' ? '0.25' : undefined} min={type === 'number' ? '0' : undefined} disabled={disabled} value={value} onChange={(e) => onChange(e.target.value)} className="mt-1 w-full rounded-xl border border-slate-200 bg-slate-50 px-2.5 py-2.5 text-xs" /></label>;
 }
