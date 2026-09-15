@@ -1,283 +1,118 @@
 'use client';
 
-import { useState, useEffect } from 'react';
-import {
-  FileCheck2,
-  Building,
-  CreditCard,
-  Send,
-  CheckCircle,
-  AlertCircle,
-  ShieldCheck,
-  Search,
-  ChevronRight,
-  Loader2,
-  RefreshCw
-} from 'lucide-react';
-
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useRouter } from 'next/navigation';
+import { AlertTriangle, CheckCircle2, FileCheck2, Loader2, RefreshCw, Send, Users } from 'lucide-react';
 import AccNavbar from '@/components/accountant/AccNavbar';
 import AccSideNav from '@/components/accountant/AccSideNav';
 
-export default function BatchStagingPage() {
-  const [batches, setBatches] = useState([]);
-  const [selectedBatches, setSelectedBatches] = useState([]);
-  const [searchQuery, setSearchQuery] = useState('');
-  const [loading, setLoading] = useState(true);
-  const [submitting, setSubmitting] = useState(false);
-  const [error, setError] = useState(null);
+function money(value) {
+  return `P${Number(value || 0).toLocaleString('en-BW', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+}
 
-  // Fetch initial batch data from API route
-  const fetchBatches = async () => {
+const STATUS = {
+  draft: ['Draft', 'bg-slate-100 text-slate-700'],
+  ready_for_ceo: ['Waiting for CEO', 'bg-indigo-50 text-indigo-700'],
+  rejected_by_ceo: ['Returned by CEO', 'bg-rose-50 text-rose-700'],
+  approved_by_ceo: ['CEO Approved', 'bg-emerald-50 text-emerald-700'],
+  executing: ['Payment Running', 'bg-amber-50 text-amber-700'],
+  paid: ['Paid', 'bg-emerald-50 text-emerald-700'],
+  partial_failed: ['Partial Failure', 'bg-rose-50 text-rose-700'],
+  failed: ['Failed', 'bg-rose-50 text-rose-700'],
+};
+
+export default function PayrollPreparationPage() {
+  const router = useRouter();
+  const [rosters, setRosters] = useState([]);
+  const [batches, setBatches] = useState([]);
+  const [selected, setSelected] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [creating, setCreating] = useState(false);
+  const [error, setError] = useState('');
+  const [siteFilter, setSiteFilter] = useState('all');
+
+  const load = useCallback(async () => {
     setLoading(true);
-    setError(null);
+    setError('');
     try {
-      const res = await fetch('/api/accountant/staging');
-      const json = await res.json();
-      if (json.success) {
-        setBatches(json.data);
-      } else {
-        setError(json.message || 'Failed to load batches');
-      }
+      const response = await fetch('/api/accountant/payroll', { cache: 'no-store' });
+      const result = await response.json();
+      if (!response.ok || !result.success) throw new Error(result.error || 'Could not load payroll data.');
+      setRosters(result.rosters || []);
+      setBatches(result.batches || []);
+      setSelected((current) => current.filter((id) => (result.rosters || []).some((row) => row.id === id)));
     } catch (err) {
-      setError('Network error fetching batch staging records');
+      setError(err.message);
     } finally {
       setLoading(false);
     }
-  };
-
-  useEffect(() => {
-    fetchBatches();
   }, []);
 
-  const toggleSelect = (id) => {
-    setSelectedBatches((prev) =>
-      prev.includes(id) ? prev.filter((item) => item !== id) : [...prev, id]
-    );
-  };
+  useEffect(() => { load(); }, [load]);
 
-  // Stage an individual batch via API
-  const handleStageBatch = async (id) => {
+  const sites = useMemo(() => {
+    const map = new Map();
+    rosters.forEach((roster) => { if (roster.site) map.set(roster.site.id, roster.site); });
+    return [...map.values()];
+  }, [rosters]);
+
+  const visibleRosters = useMemo(() => siteFilter === 'all' ? rosters : rosters.filter((roster) => roster.site?.id === siteFilter), [rosters, siteFilter]);
+  const selectedRosters = rosters.filter((roster) => selected.includes(roster.id));
+  const selectionGross = selectedRosters.reduce((sum, roster) => sum + Number(roster.estimated_gross || 0), 0);
+
+  function toggle(id) {
+    setSelected((current) => current.includes(id) ? current.filter((value) => value !== id) : [...current, id]);
+  }
+
+  async function prepareBatch() {
+    if (!selected.length) return;
+    setCreating(true);
+    setError('');
     try {
-      const res = await fetch(`/api/accountant/staging/${id}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ status: 'Staged for Exec Review' }),
-      });
-      const json = await res.json();
-
-      if (json.success) {
-        setBatches((prev) =>
-          prev.map((b) => (b.id === id ? { ...b, status: 'Staged for Exec Review' } : b))
-        );
-      } else {
-        alert(json.message || 'Failed to stage batch');
-      }
-    } catch (err) {
-      alert('Network error while staging batch');
-    }
-  };
-
-  // Push all selected batches to Executive Review via bulk API
-  const handlePushToExec = async () => {
-    if (selectedBatches.length === 0) return;
-
-    setSubmitting(true);
-    try {
-      const res = await fetch('/api/accountant/staging/push-to-exec', {
+      const response = await fetch('/api/accountant/payroll', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ batchIds: selectedBatches }),
+        body: JSON.stringify({ roster_ids: selected }),
       });
-      const json = await res.json();
-
-      if (json.success) {
-        // Optimistically update status on UI
-        setBatches((prev) =>
-          prev.map((b) =>
-            selectedBatches.includes(b.id)
-              ? { ...b, status: 'Staged for Exec Review' }
-              : b
-          )
-        );
-        setSelectedBatches([]);
-      } else {
-        alert(json.message || 'Failed to push batches to executive review');
-      }
+      const result = await response.json();
+      if (!response.ok || !result.success) throw new Error(result.error || 'Could not prepare payroll batch.');
+      router.push(`/dashboard/accountant/staging/${result.data.id}`);
     } catch (err) {
-      alert('Error transferring batches to Executive Review');
+      setError(err.message);
     } finally {
-      setSubmitting(false);
+      setCreating(false);
     }
-  };
-
-  const filteredBatches = batches.filter(
-    (b) =>
-      b.batchName.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      b.id.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      b.bankProvider.toLowerCase().includes(searchQuery.toLowerCase())
-  );
+  }
 
   return (
-    <div className="min-h-screen bg-slate-50 flex flex-col lg:flex-row font-sans">
-      {/* Sidebar Navigation Component */}
+    <div className="min-h-screen bg-slate-100 flex flex-col lg:flex-row text-slate-900">
       <AccSideNav />
+      <div className="flex-1 min-w-0">
+        <AccNavbar title="Payroll Preparation" subtitle="Select HR-approved rosters, calculate payroll and prepare one CEO batch" />
+        <main className="p-4 sm:p-6 lg:p-8 max-w-7xl mx-auto space-y-6">
+          <section className="rounded-3xl bg-slate-950 p-6 sm:p-8 text-white flex flex-col lg:flex-row lg:items-center justify-between gap-5">
+            <div><p className="text-[11px] uppercase tracking-[0.18em] text-indigo-300 font-bold">Approved Attendance Only</p><h1 className="text-2xl sm:text-3xl font-black mt-1">Build Payroll Batch</h1><p className="text-sm text-slate-300 mt-2 max-w-2xl">Each selected roster can enter payroll only once. Pay is calculated from its HR-approved shift entries and the hourly-rate snapshot captured when attendance was recorded.</p></div>
+            <button onClick={prepareBatch} disabled={!selected.length || creating} className="rounded-xl bg-indigo-600 px-5 py-3 text-sm font-bold disabled:opacity-40 inline-flex items-center justify-center gap-2 shrink-0">{creating ? <Loader2 className="w-4 h-4 animate-spin" /> : <FileCheck2 className="w-4 h-4" />}Prepare {selected.length || ''} Batch</button>
+          </section>
 
-      {/* Main Area */}
-      <div className="flex-1 flex flex-col min-w-0">
-        {/* Top Header Component */}
-        <AccNavbar
-          title="Batch Staging & Banking Routing"
-          subtitle="Verify bank codes, account details, and route payout batches for executive authorization"
-        />
+          {error && <div className="rounded-2xl border border-rose-200 bg-rose-50 p-4 text-sm font-semibold text-rose-700 flex items-center gap-2"><AlertTriangle className="w-4 h-4" />{error}</div>}
 
-        {/* Page Content */}
-        <main className="p-4 sm:p-6 lg:p-8 space-y-6 max-w-7xl w-full mx-auto">
-          {/* Header Summary */}
-          <div className="bg-indigo-950 text-white rounded-3xl p-6 sm:p-8 shadow-xl flex flex-col md:flex-row items-start md:items-center justify-between gap-6 relative overflow-hidden">
-            <div className="space-y-2 z-10">
-              <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-indigo-800/80 text-indigo-200 text-xs font-extrabold uppercase tracking-wider">
-                <ShieldCheck className="w-4 h-4 text-emerald-400" /> Banking Gateway Audit
-              </span>
-              <h2 className="text-2xl font-black tracking-tight">Stage Batches to Executive Review</h2>
-              <p className="text-xs text-indigo-200/80 max-w-xl">
-                Ensure all employee account numbers, branch codes, and reimbursement claims have been cross-checked before transferring control to Executive Review.
-              </p>
-            </div>
+          <section className="rounded-3xl border border-slate-200 bg-white p-4 shadow-sm flex flex-col sm:flex-row gap-3 sm:items-center justify-between">
+            <div className="flex gap-3 items-center"><select value={siteFilter} onChange={(e) => setSiteFilter(e.target.value)} className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm font-semibold"><option value="all">All Sites</option>{sites.map((site) => <option key={site.id} value={site.id}>{site.site_name}</option>)}</select><button onClick={load} className="rounded-xl border border-slate-200 p-2.5 text-slate-600"><RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} /></button></div>
+            <div className="text-right"><div className="text-xs text-slate-500 font-semibold">Selected estimated gross</div><div className="font-black text-lg">{money(selectionGross)}</div></div>
+          </section>
 
-            <div className="z-10 shrink-0">
-              <button
-                onClick={handlePushToExec}
-                disabled={selectedBatches.length === 0 || submitting}
-                className="px-6 py-3.5 bg-indigo-600 hover:bg-indigo-500 disabled:bg-slate-800 text-white font-extrabold text-xs rounded-2xl transition shadow-lg shadow-indigo-600/40 flex items-center gap-2 cursor-pointer disabled:cursor-not-allowed"
-              >
-                {submitting ? (
-                  <>
-                    <Loader2 className="w-4 h-4 animate-spin" /> Transferring...
-                  </>
-                ) : (
-                  <>
-                    <Send className="w-4 h-4" /> Push {selectedBatches.length} Batch(es) to Executive
-                  </>
-                )}
-              </button>
-            </div>
-          </div>
+          <section className="rounded-3xl border border-slate-200 bg-white shadow-sm overflow-hidden">
+            <div className="p-5 border-b border-slate-100 flex items-center justify-between"><div><h2 className="font-black">Payroll-ready Rosters</h2><p className="text-xs text-slate-500 mt-1">Approved by HR and not yet included in another batch.</p></div><span className="text-xs font-bold text-slate-400">{visibleRosters.length} available</span></div>
+            {loading ? <div className="p-14 flex items-center justify-center gap-2 text-sm text-slate-500"><Loader2 className="w-5 h-5 animate-spin text-indigo-600" />Loading approved rosters...</div> : !visibleRosters.length ? <div className="p-14 text-center text-sm text-slate-500">No HR-approved rosters are waiting for payroll.</div> : <div className="overflow-x-auto"><table className="w-full text-left"><thead className="bg-slate-50 text-[10px] uppercase tracking-wider text-slate-400"><tr><th className="px-5 py-3"></th><th className="px-5 py-3">Site / Date</th><th className="px-5 py-3">Workers</th><th className="px-5 py-3">Regular</th><th className="px-5 py-3">OT</th><th className="px-5 py-3">Estimated Gross</th><th className="px-5 py-3">Status</th></tr></thead><tbody className="divide-y divide-slate-100">{visibleRosters.map((roster) => <tr key={roster.id} className={selected.includes(roster.id) ? 'bg-indigo-50/60' : ''}><td className="px-5 py-4"><input type="checkbox" checked={selected.includes(roster.id)} onChange={() => toggle(roster.id)} className="w-4 h-4" /></td><td className="px-5 py-4"><div className="font-bold text-sm">{roster.site?.site_name || 'Unknown Site'}</div><div className="text-xs text-slate-500">{roster.shift_date}</div></td><td className="px-5 py-4 font-bold">{roster.workers}</td><td className="px-5 py-4">{roster.regular_hours.toFixed(2)}h</td><td className="px-5 py-4 text-amber-700 font-bold">{roster.overtime_hours.toFixed(2)}h</td><td className="px-5 py-4 font-black">{money(roster.estimated_gross)}</td><td className="px-5 py-4"><span className="rounded-full bg-emerald-50 px-2.5 py-1 text-[10px] font-bold text-emerald-700 inline-flex items-center gap-1"><CheckCircle2 className="w-3 h-3" />HR Approved</span></td></tr>)}</tbody></table></div>}
+          </section>
 
-          {/* Toolbar: Search and Refresh */}
-          <div className="bg-white p-4 rounded-3xl border border-slate-200 shadow-xs flex flex-col sm:flex-row items-center justify-between gap-4">
-            <div className="relative w-full sm:w-80">
-              <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
-              <input
-                type="text"
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder="Search batch, bank, or ID..."
-                className="w-full pl-9 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-medium text-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-600 transition"
-              />
-            </div>
+          <section className="rounded-3xl border border-slate-200 bg-white shadow-sm overflow-hidden">
+            <div className="p-5 border-b border-slate-100"><h2 className="font-black">Payroll Batches</h2><p className="text-xs text-slate-500 mt-1">Open a batch to inspect employee calculations and payout readiness.</p></div>
+            {!batches.length ? <div className="p-12 text-center text-sm text-slate-500">No new payroll batches yet.</div> : <div className="divide-y divide-slate-100">{batches.map((batch) => { const status = STATUS[batch.status] || [batch.status, 'bg-slate-100']; return <button key={batch.id} onClick={() => router.push(`/dashboard/accountant/staging/${batch.id}`)} className="w-full p-4 text-left flex items-center justify-between gap-4 hover:bg-slate-50"><div className="flex items-center gap-3"><div className="rounded-xl bg-indigo-50 p-2.5 text-indigo-600"><Users className="w-4 h-4" /></div><div><div className="font-bold text-sm">{batch.batch_code}</div><div className="text-xs text-slate-500">{batch.pay_period?.period_name || 'Pay period'} • {batch.total_employees} employees</div></div></div><div className="text-right"><div className="font-black">{money(batch.net_total)}</div><span className={`rounded-full px-2.5 py-1 text-[10px] font-bold ${status[1]}`}>{status[0]}</span></div></button>; })}</div>}
+          </section>
 
-            <button
-              onClick={fetchBatches}
-              className="p-2 text-slate-500 hover:bg-slate-100 border border-slate-200 rounded-xl transition cursor-pointer self-end sm:self-auto"
-              title="Refresh Batches"
-            >
-              <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
-            </button>
-          </div>
-
-          {/* Staging List */}
-          {loading ? (
-            <div className="p-12 text-center bg-white rounded-3xl border border-slate-200">
-              <Loader2 className="w-8 h-8 text-indigo-600 animate-spin mx-auto mb-2" />
-              <p className="text-xs font-semibold text-slate-500">Loading payout batches from API...</p>
-            </div>
-          ) : error ? (
-            <div className="p-8 text-center bg-rose-50 border border-rose-200 rounded-3xl text-rose-700 text-xs font-medium">
-              {error}
-            </div>
-          ) : (
-            <div className="space-y-4">
-              {filteredBatches.map((b) => (
-                <div
-                  key={b.id}
-                  className={`bg-white border rounded-3xl p-6 shadow-xs transition ${
-                    selectedBatches.includes(b.id)
-                      ? 'border-indigo-600 ring-2 ring-indigo-600/10'
-                      : 'border-slate-200 hover:border-slate-300'
-                  }`}
-                >
-                  <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-6">
-                    <div className="flex items-start gap-4">
-                      <input
-                        type="checkbox"
-                        checked={selectedBatches.includes(b.id)}
-                        onChange={() => toggleSelect(b.id)}
-                        disabled={!b.routingVerified || b.status === 'Staged for Exec Review'}
-                        className="mt-1 h-5 w-5 rounded-lg border-slate-300 text-indigo-600 focus:ring-indigo-500 transition cursor-pointer disabled:cursor-not-allowed"
-                      />
-                      <div className="space-y-1">
-                        <div className="flex items-center gap-2">
-                          <span className="font-extrabold text-slate-900 text-base">{b.batchName}</span>
-                          <span className="text-[11px] font-bold text-slate-500 bg-slate-100 px-2.5 py-0.5 rounded-md">
-                            {b.id}
-                          </span>
-                        </div>
-                        <p className="text-xs text-slate-500 font-medium">
-                          Pay Period: <span className="font-bold text-slate-700">{b.period}</span> • {b.totalWorkers} Workers
-                        </p>
-                      </div>
-                    </div>
-
-                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-4 lg:gap-8 border-t lg:border-t-0 border-slate-100 pt-4 lg:pt-0">
-                      <div>
-                        <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider block">Gross Outflow</span>
-                        <span className="text-base font-black text-slate-900">
-                          BWP {b.grossPayout.toLocaleString('en-BW', { minimumFractionDigits: 2 })}
-                        </span>
-                      </div>
-
-                      <div>
-                        <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider block">Payout Institution</span>
-                        <span className="text-xs font-extrabold text-slate-800 flex items-center gap-1.5 mt-0.5">
-                          <Building className="w-3.5 h-3.5 text-indigo-600" /> {b.bankProvider}
-                        </span>
-                        <span className="text-[10px] text-slate-400 font-semibold">Branch Code: {b.branchCode}</span>
-                      </div>
-
-                      <div className="col-span-2 sm:col-span-1 flex flex-col justify-center">
-                        <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider block">Status</span>
-                        {b.routingVerified ? (
-                          <span className="text-xs font-bold text-emerald-600 flex items-center gap-1 mt-0.5">
-                            <CheckCircle className="w-3.5 h-3.5" /> Routing Verified
-                          </span>
-                        ) : (
-                          <span className="text-xs font-bold text-rose-600 flex items-center gap-1 mt-0.5">
-                            <AlertCircle className="w-3.5 h-3.5" /> Unverified Code
-                          </span>
-                        )}
-                      </div>
-                    </div>
-
-                    <div className="flex items-center gap-2 border-t lg:border-t-0 border-slate-100 pt-4 lg:pt-0">
-                      {b.status === 'Staged for Exec Review' ? (
-                        <span className="text-xs font-extrabold text-indigo-600 bg-indigo-50 border border-indigo-200 px-4 py-2.5 rounded-xl w-full text-center">
-                          ✓ Staged
-                        </span>
-                      ) : (
-                        <button
-                          onClick={() => handleStageBatch(b.id)}
-                          disabled={!b.routingVerified}
-                          className="w-full lg:w-auto px-4 py-2.5 bg-slate-900 hover:bg-slate-800 disabled:bg-slate-200 text-white font-bold text-xs rounded-xl transition cursor-pointer disabled:cursor-not-allowed flex items-center justify-center gap-1"
-                        >
-                          Stage Batch <ChevronRight className="w-4 h-4" />
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
+          <section className="rounded-3xl border border-amber-100 bg-amber-50 p-4 text-xs text-amber-900 flex items-start gap-2"><Send className="w-4 h-4 mt-0.5" /><p><strong>CEO handoff:</strong> Accountant can only submit a batch once every employee with pay due has verified payout details from HR. Missing bank/mobile-money profiles block submission instead of letting bad payment instructions through.</p></section>
         </main>
       </div>
     </div>
