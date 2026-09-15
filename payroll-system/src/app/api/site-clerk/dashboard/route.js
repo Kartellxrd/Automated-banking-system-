@@ -60,15 +60,22 @@ export async function GET() {
 
     let enteredWorkers = 0;
     let totalHours = 0;
+    let timesheet = null;
 
     if (roster?.id) {
-      const { data: entries, error: entryError } = await db
-        .from('shift_logs')
-        .select('worked_hours')
-        .eq('daily_roster_id', roster.id);
+      const [{ data: entries, error: entryError }, { data: uploads, error: uploadError }] = await Promise.all([
+        db.from('shift_logs').select('worked_hours').eq('daily_roster_id', roster.id),
+        db.from('timesheet_uploads')
+          .select('id, original_filename, processing_status, uploaded_at, confirmed_at, extraction_error')
+          .eq('roster_id', roster.id)
+          .order('uploaded_at', { ascending: false })
+          .limit(1),
+      ]);
       if (entryError) throw entryError;
+      if (uploadError) throw uploadError;
       enteredWorkers = entries?.length || 0;
       totalHours = (entries || []).reduce((sum, row) => sum + Number(row.worked_hours || 0), 0);
+      timesheet = uploads?.[0] || null;
     }
 
     return NextResponse.json({
@@ -78,6 +85,7 @@ export async function GET() {
         site: context.site,
         today,
         roster: roster || null,
+        timesheet,
         metrics: {
           assignedWorkers: activeWorkers,
           enteredWorkers,
