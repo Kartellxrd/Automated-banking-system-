@@ -1,213 +1,97 @@
 'use client';
 
-import { useState } from 'react';
-import {
-  Receipt,
-  Search,
-  Fuel,
-  Wrench,
-  ShoppingBag,
-  Check,
-  X,
-  Upload,
-  AlertTriangle,
-  FileCheck,
-  ExternalLink
-} from 'lucide-react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { AlertTriangle, CheckCircle2, ExternalLink, Loader2, Plus, Receipt, RefreshCw, Search, X, XCircle } from 'lucide-react';
 import AccNavbar from '@/components/accountant/AccNavbar';
 import AccSideNav from '@/components/accountant/AccSideNav';
 
-export default function ExpensesAuditPage() {
-  const [filter, setFilter] = useState('ALL');
-  const [searchQuery, setSearchQuery] = useState('');
+const EMPTY = { title: '', vendor: '', amount: '', spent_at: new Date().toISOString().slice(0, 10), category_id: '', site_id: '', description: '', notes: '', receipt: null };
+const money = (value) => `P${Number(value || 0).toLocaleString('en-BW', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
-  const [expenses, setExpenses] = useState([
-    {
-      id: 'EXP-1001',
-      category: 'Fuel',
-      vendor: 'Engen Petrol Station',
-      amount: 1250.00,
-      purchaser: 'K. Phuthego',
-      site: 'Jwaneng Pit B',
-      date: '2026-08-12',
-      hasProof: true,
-      receiptUrl: 'https://images.unsplash.com/photo-1554224155-8d04cb21cd6c?auto=format&fit=crop&q=80&w=800',
-      status: 'Verified',
-      notes: 'Fuel voucher approved by site manager.',
-    },
-    {
-      id: 'EXP-1002',
-      category: 'Logistics',
-      vendor: 'Botswana Courier Express',
-      amount: 450.00,
-      purchaser: 'T. Mokoena',
-      site: 'Orapa Shaft 3',
-      date: '2026-08-11',
-      hasProof: true,
-      receiptUrl: 'https://images.unsplash.com/photo-1584515979956-d9f6e5d09982?auto=format&fit=crop&q=80&w=800',
-      status: 'Pending Review',
-      notes: 'Waybill attached for drill bits shipment.',
-    },
-    {
-      id: 'EXP-1003',
-      category: 'Petty Cash',
-      vendor: 'Local Hardware Store',
-      amount: 620.00,
-      purchaser: 'M. Molefe',
-      site: 'Jwaneng Pit B',
-      date: '2026-08-10',
-      hasProof: false,
-      receiptUrl: null,
-      status: 'Rejected',
-      notes: 'Till slip missing stamp and breakdown.',
-    },
-  ]);
+export default function ExpensesPage() {
+  const [expenses, setExpenses] = useState([]);
+  const [categories, setCategories] = useState([]);
+  const [sites, setSites] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+  const [search, setSearch] = useState('');
+  const [status, setStatus] = useState('all');
+  const [open, setOpen] = useState(false);
+  const [form, setForm] = useState(EMPTY);
 
-  const filteredExpenses = expenses.filter((e) => {
-    const matchesFilter = filter === 'ALL' || e.category.toUpperCase() === filter;
-    const matchesSearch =
-      e.vendor.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      e.purchaser.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      e.id.toLowerCase().includes(searchQuery.toLowerCase());
-    return matchesFilter && matchesSearch;
-  });
+  const load = useCallback(async () => {
+    setLoading(true);
+    setError('');
+    try {
+      const response = await fetch('/api/accountant/expenses', { cache: 'no-store' });
+      const result = await response.json();
+      if (!response.ok || !result.success) throw new Error(result.error || 'Could not load expenses.');
+      setExpenses(result.data || []);
+      setCategories(result.categories || []);
+      setSites(result.sites || []);
+    } catch (err) { setError(err.message); }
+    finally { setLoading(false); }
+  }, []);
 
-  const handleStatusChange = (id, newStatus) => {
-    setExpenses((prev) =>
-      prev.map((e) => (e.id === id ? { ...e, status: newStatus } : e))
-    );
-  };
+  useEffect(() => { load(); }, [load]);
 
-  return (
-    <div className="min-h-screen bg-slate-50 flex flex-col lg:flex-row font-sans">
-      {/* Accountant Side Navigation */}
-      <AccSideNav />
+  const filtered = useMemo(() => expenses.filter((expense) => {
+    const q = search.trim().toLowerCase();
+    const matchesSearch = !q || [expense.title, expense.vendor, expense.description, expense.category?.category_name, expense.site?.site_name].some((value) => String(value || '').toLowerCase().includes(q));
+    return matchesSearch && (status === 'all' || expense.status === status);
+  }), [expenses, search, status]);
 
-      {/* Main Content Area */}
-      <div className="flex-1 flex flex-col min-w-0">
-        <AccNavbar
-          title="Expense Receipts & Outflow Verification"
-          subtitle="Audit petrol slips, petty cash vouchers, and logistics receipts"
-        />
+  async function createExpense(event) {
+    event.preventDefault();
+    setSaving(true);
+    setError('');
+    try {
+      const payload = new FormData();
+      Object.entries(form).forEach(([key, value]) => { if (value !== null && value !== '') payload.append(key, value); });
+      const response = await fetch('/api/accountant/expenses', { method: 'POST', body: payload });
+      const result = await response.json();
+      if (!response.ok || !result.success) throw new Error(result.error || 'Could not record expense.');
+      setOpen(false);
+      setForm(EMPTY);
+      await load();
+    } catch (err) { setError(err.message); }
+    finally { setSaving(false); }
+  }
 
-        <main className="p-4 sm:p-6 lg:p-8 space-y-6 max-w-7xl w-full mx-auto">
-          {/* Top Controls & Category Filters */}
-          <div className="bg-white p-5 rounded-3xl border border-slate-200/80 shadow-xs flex flex-col sm:flex-row items-center justify-between gap-4">
-            <div className="flex items-center gap-2 overflow-x-auto w-full sm:w-auto pb-2 sm:pb-0">
-              {['ALL', 'FUEL', 'LOGISTICS', 'PETTY CASH'].map((cat) => (
-                <button
-                  key={cat}
-                  onClick={() => setFilter(cat)}
-                  className={`px-4 py-2 rounded-xl text-xs font-bold transition cursor-pointer shrink-0 ${
-                    filter === cat
-                      ? 'bg-indigo-600 text-white shadow-xs shadow-indigo-600/30'
-                      : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
-                  }`}
-                >
-                  {cat}
-                </button>
-              ))}
-            </div>
+  async function changeStatus(id, nextStatus) {
+    setError('');
+    try {
+      const response = await fetch('/api/accountant/expenses', {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id, status: nextStatus }),
+      });
+      const result = await response.json();
+      if (!response.ok || !result.success) throw new Error(result.error || 'Could not update expense.');
+      await load();
+    } catch (err) { setError(err.message); }
+  }
 
-            <div className="relative w-full sm:w-72">
-              <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
-              <input
-                type="text"
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder="Search vendor, buyer, ID..."
-                className="w-full pl-9 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-medium text-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-600 transition"
-              />
-            </div>
-          </div>
+  const total = filtered.reduce((sum, expense) => sum + Number(expense.amount || 0), 0);
 
-          {/* Expense Grid Cards */}
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
-            {filteredExpenses.map((exp) => (
-              <div
-                key={exp.id}
-                className="bg-white border border-slate-200/80 rounded-3xl p-5 shadow-xs flex flex-col justify-between space-y-4 hover:border-slate-300 transition"
-              >
-                <div className="space-y-3">
-                  <div className="flex items-center justify-between">
-                    <span className="text-[11px] font-black uppercase text-indigo-600 bg-indigo-50 px-2.5 py-1 rounded-lg border border-indigo-100">
-                      {exp.category}
-                    </span>
-                    <span
-                      className={`text-[11px] font-bold px-2.5 py-1 rounded-full ${
-                        exp.status === 'Verified'
-                          ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
-                          : exp.status === 'Rejected'
-                          ? 'bg-rose-50 text-rose-700 border border-rose-200'
-                          : 'bg-amber-50 text-amber-700 border border-amber-200'
-                      }`}
-                    >
-                      {exp.status}
-                    </span>
-                  </div>
+  return <div className="min-h-screen bg-slate-100 flex flex-col lg:flex-row text-slate-900">
+    <AccSideNav />
+    <div className="flex-1 min-w-0">
+      <AccNavbar title="Expenses" subtitle="Record and verify operational expenses using real company data" />
+      <main className="p-4 sm:p-6 lg:p-8 max-w-7xl mx-auto space-y-6">
+        <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-4"><div><p className="text-[11px] uppercase tracking-[0.16em] font-bold text-indigo-600">Financial Records</p><h1 className="text-2xl font-black mt-1">Expense Register</h1><p className="text-sm text-slate-500 mt-1">No demo expenses. Every row below is stored in Supabase and audit logged.</p></div><div className="flex gap-2"><button onClick={load} className="rounded-xl border border-slate-200 p-2.5"><RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} /></button><button onClick={() => setOpen(true)} className="rounded-xl bg-indigo-600 text-white px-4 py-2.5 text-sm font-bold inline-flex items-center gap-2"><Plus className="w-4 h-4" />Record Expense</button></div></section>
 
-                  <div>
-                    <h3 className="font-extrabold text-slate-900 text-sm">{exp.vendor}</h3>
-                    <p className="text-xs text-slate-500 mt-0.5">
-                      Purchased by <span className="font-bold text-slate-700">{exp.purchaser}</span> ({exp.site})
-                    </p>
-                  </div>
+        {error && <div className="rounded-2xl border border-rose-200 bg-rose-50 p-4 text-sm font-semibold text-rose-700 flex items-center gap-2"><AlertTriangle className="w-4 h-4" />{error}</div>}
 
-                  <div className="p-3 bg-slate-50 rounded-2xl border border-slate-100 flex items-center justify-between">
-                    <span className="text-xs font-semibold text-slate-500">Outflow Amount:</span>
-                    <span className="text-base font-black text-slate-900">BWP {exp.amount.toFixed(2)}</span>
-                  </div>
+        <section className="rounded-3xl border border-slate-200 bg-white p-4 shadow-sm grid grid-cols-1 md:grid-cols-3 gap-3"><div className="relative"><Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" /><input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search title, vendor, site..." className="w-full rounded-xl border border-slate-200 bg-slate-50 pl-10 pr-3 py-2.5 text-sm" /></div><select value={status} onChange={(e) => setStatus(e.target.value)} className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm font-semibold"><option value="all">All Statuses</option><option value="recorded">Recorded</option><option value="verified">Verified</option><option value="flagged">Flagged</option></select><div className="rounded-xl bg-slate-950 text-white px-4 py-2.5 text-right"><div className="text-[10px] uppercase tracking-wider text-slate-400 font-bold">Filtered Total</div><div className="font-black">{money(total)}</div></div></section>
 
-                  {/* Proof Preview Box */}
-                  <div className="space-y-1.5">
-                    <span className="text-[11px] font-bold text-slate-500">Attached Proof:</span>
-                    {exp.hasProof ? (
-                      <div className="relative group rounded-xl overflow-hidden border border-slate-200 h-28 bg-slate-100">
-                        <img
-                          src={exp.receiptUrl}
-                          alt="Till slip proof"
-                          className="w-full h-full object-cover group-hover:scale-105 transition duration-200"
-                        />
-                        <a
-                          href={exp.receiptUrl}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="absolute inset-0 bg-slate-950/40 opacity-0 group-hover:opacity-100 transition flex items-center justify-center text-white text-xs font-bold gap-1.5"
-                        >
-                          <ExternalLink className="w-4 h-4" /> Expand Receipt
-                        </a>
-                      </div>
-                    ) : (
-                      <div className="h-28 rounded-xl border border-dashed border-rose-200 bg-rose-50/50 flex flex-col items-center justify-center p-4 text-center">
-                        <AlertTriangle className="w-6 h-6 text-rose-500 mb-1" />
-                        <p className="text-xs font-bold text-rose-700">No Proof Attached</p>
-                        <p className="text-[10px] text-rose-500 mt-0.5">Receipt photo required for approval</p>
-                      </div>
-                    )}
-                  </div>
-                </div>
-
-                {/* Card Action Footer */}
-                <div className="pt-3 border-t border-slate-100 flex items-center gap-2">
-                  <button
-                    onClick={() => handleStatusChange(exp.id, 'Verified')}
-                    disabled={!exp.hasProof}
-                    className="flex-1 py-2 bg-emerald-600 hover:bg-emerald-700 disabled:bg-slate-200 text-white font-bold text-xs rounded-xl transition flex items-center justify-center gap-1.5 cursor-pointer disabled:cursor-not-allowed shadow-xs"
-                  >
-                    <Check className="w-3.5 h-3.5" /> Approve
-                  </button>
-                  <button
-                    onClick={() => handleStatusChange(exp.id, 'Rejected')}
-                    className="flex-1 py-2 bg-rose-50 hover:bg-rose-100 text-rose-700 font-bold text-xs rounded-xl border border-rose-200 transition flex items-center justify-center gap-1.5 cursor-pointer"
-                  >
-                    <X className="w-3.5 h-3.5" /> Reject
-                  </button>
-                </div>
-              </div>
-            ))}
-          </div>
-        </main>
-      </div>
+        <section className="rounded-3xl border border-slate-200 bg-white shadow-sm overflow-hidden">{loading ? <div className="p-16 flex justify-center gap-2 text-sm text-slate-500"><Loader2 className="w-5 h-5 animate-spin text-indigo-600" />Loading expenses...</div> : !filtered.length ? <div className="p-16 text-center text-sm text-slate-500">No expenses recorded for this filter.</div> : <div className="overflow-x-auto"><table className="w-full text-left"><thead className="bg-slate-50 text-[10px] uppercase tracking-wider text-slate-400"><tr><th className="px-5 py-3">Expense</th><th className="px-5 py-3">Site</th><th className="px-5 py-3">Date</th><th className="px-5 py-3">Amount</th><th className="px-5 py-3">Receipt</th><th className="px-5 py-3">Status</th><th className="px-5 py-3 text-right">Action</th></tr></thead><tbody className="divide-y divide-slate-100">{filtered.map((expense) => <tr key={expense.id}><td className="px-5 py-4"><div className="font-bold text-sm">{expense.title}</div><div className="text-xs text-slate-500">{expense.vendor || expense.category?.category_name || 'Uncategorized'}</div></td><td className="px-5 py-4 text-sm">{expense.site?.site_name || '—'}</td><td className="px-5 py-4 text-sm">{expense.spent_at}</td><td className="px-5 py-4 font-black">{money(expense.amount)}</td><td className="px-5 py-4">{expense.receipt_url ? <a href={expense.receipt_url} target="_blank" rel="noreferrer" className="text-xs font-bold text-indigo-600 inline-flex items-center gap-1"><ExternalLink className="w-3 h-3" />Open</a> : <span className="text-xs text-slate-400">No receipt</span>}</td><td className="px-5 py-4"><Status value={expense.status} /></td><td className="px-5 py-4"><div className="flex justify-end gap-2"><button onClick={() => changeStatus(expense.id, 'verified')} className="p-2 rounded-xl text-emerald-600 hover:bg-emerald-50" title="Verify"><CheckCircle2 className="w-4 h-4" /></button><button onClick={() => changeStatus(expense.id, 'flagged')} className="p-2 rounded-xl text-rose-600 hover:bg-rose-50" title="Flag"><XCircle className="w-4 h-4" /></button></div></td></tr>)}</tbody></table></div>}</section>
+      </main>
     </div>
-  );
+
+    {open && <div className="fixed inset-0 z-50 bg-slate-950/60 p-4 flex items-center justify-center"><div className="bg-white rounded-3xl w-full max-w-2xl max-h-[92vh] overflow-y-auto"><div className="p-5 border-b border-slate-100 flex justify-between"><div><h2 className="font-black text-lg">Record Expense</h2><p className="text-xs text-slate-500 mt-1">Receipt is optional but JPG, PNG and PDF are supported.</p></div><button onClick={() => setOpen(false)}><X className="w-5 h-5" /></button></div><form onSubmit={createExpense} className="p-5 grid grid-cols-1 sm:grid-cols-2 gap-4"><Field required label="Title" value={form.title} onChange={(v) => setForm({ ...form, title: v })} /><Field label="Vendor / Payee" value={form.vendor} onChange={(v) => setForm({ ...form, vendor: v })} /><Field required label="Amount (BWP)" type="number" min="0.01" step="0.01" value={form.amount} onChange={(v) => setForm({ ...form, amount: v })} /><Field required label="Date" type="date" value={form.spent_at} onChange={(v) => setForm({ ...form, spent_at: v })} /><Select label="Category" value={form.category_id} onChange={(v) => setForm({ ...form, category_id: v })} options={categories.map((c) => [c.id, c.category_name])} empty="Uncategorized" /><Select label="Site" value={form.site_id} onChange={(v) => setForm({ ...form, site_id: v })} options={sites.map((s) => [s.id, s.site_name])} empty="No site" /><Field label="Description" value={form.description} onChange={(v) => setForm({ ...form, description: v })} /><Field label="Notes" value={form.notes} onChange={(v) => setForm({ ...form, notes: v })} /><label className="sm:col-span-2 space-y-1"><span className="text-xs font-bold text-slate-600">Receipt</span><input type="file" accept="image/jpeg,image/png,application/pdf" onChange={(e) => setForm({ ...form, receipt: e.target.files?.[0] || null })} className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm" /></label><div className="sm:col-span-2 flex justify-end gap-2"><button type="button" onClick={() => setOpen(false)} className="px-4 py-2.5 text-sm font-bold text-slate-600">Cancel</button><button disabled={saving} className="rounded-xl bg-indigo-600 px-5 py-2.5 text-sm font-bold text-white inline-flex items-center gap-2">{saving && <Loader2 className="w-4 h-4 animate-spin" />}Save Expense</button></div></form></div></div>}
+  </div>;
 }
+
+function Status({ value }) { const cls = value === 'verified' ? 'bg-emerald-50 text-emerald-700' : value === 'flagged' ? 'bg-rose-50 text-rose-700' : 'bg-slate-100 text-slate-700'; return <span className={`rounded-full px-2.5 py-1 text-[10px] font-bold ${cls}`}>{value}</span>; }
+function Field({ label, value, onChange, ...props }) { return <label className="space-y-1"><span className="text-xs font-bold text-slate-600">{label}</span><input value={value} onChange={(e) => onChange(e.target.value)} className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm" {...props} /></label>; }
+function Select({ label, value, onChange, options, empty }) { return <label className="space-y-1"><span className="text-xs font-bold text-slate-600">{label}</span><select value={value} onChange={(e) => onChange(e.target.value)} className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm"><option value="">{empty}</option>{options.map(([v, l]) => <option key={v} value={v}>{l}</option>)}</select></label>; }
