@@ -67,9 +67,7 @@ async function buildEmployeePayload(db) {
 
 export async function GET() {
   const access = await requireHR('employees.manage');
-  if (!access.ok) {
-    return NextResponse.json({ success: false, error: access.error }, { status: access.status });
-  }
+  if (!access.ok) return NextResponse.json({ success: false, error: access.error }, { status: access.status });
 
   try {
     const db = createSupabaseAdminClient();
@@ -83,9 +81,7 @@ export async function GET() {
 
 export async function POST(request) {
   const access = await requireHR('employees.manage');
-  if (!access.ok) {
-    return NextResponse.json({ success: false, error: access.error }, { status: access.status });
-  }
+  if (!access.ok) return NextResponse.json({ success: false, error: access.error }, { status: access.status });
 
   try {
     const body = await request.json();
@@ -97,6 +93,11 @@ export async function POST(request) {
 
     if (!firstName || !lastName || !jobRole || !Number.isFinite(hourlyRate) || hourlyRate < 0) {
       return NextResponse.json({ success: false, error: 'First name, last name, job role and a valid hourly rate are required.' }, { status: 400 });
+    }
+
+    if (siteId) {
+      const siteAccess = await requireHR('employees.assign_site');
+      if (!siteAccess.ok) return NextResponse.json({ success: false, error: siteAccess.error }, { status: siteAccess.status });
     }
 
     const db = createSupabaseAdminClient();
@@ -137,9 +138,7 @@ export async function POST(request) {
 
 export async function PATCH(request) {
   const access = await requireHR('employees.manage');
-  if (!access.ok) {
-    return NextResponse.json({ success: false, error: access.error }, { status: access.status });
-  }
+  if (!access.ok) return NextResponse.json({ success: false, error: access.error }, { status: access.status });
 
   try {
     const body = await request.json();
@@ -164,6 +163,12 @@ export async function PATCH(request) {
     if (beforeError) throw beforeError;
     if (!before) return NextResponse.json({ success: false, error: 'Employee not found.' }, { status: 404 });
 
+    const siteChanged = (before.primary_site_id || null) !== (siteId || null);
+    if (siteChanged) {
+      const siteAccess = await requireHR('employees.assign_site');
+      if (!siteAccess.ok) return NextResponse.json({ success: false, error: siteAccess.error }, { status: siteAccess.status });
+    }
+
     const { data: employee, error } = await db.rpc('hr_update_employee', {
       p_hr_id: access.user.id,
       p_employee_id: id,
@@ -183,7 +188,6 @@ export async function PATCH(request) {
       return NextResponse.json({ success: false, error: duplicate ? 'That national ID is already assigned to another employee.' : error.message }, { status: duplicate ? 409 : 400 });
     }
 
-    const siteChanged = (before.primary_site_id || null) !== (siteId || null);
     const roleChanged = before.job_role !== jobRole;
     const rateChanged = Number(before.hourly_rate || 0) !== hourlyRate;
     const statusChanged = before.status !== status;
