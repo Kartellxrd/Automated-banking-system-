@@ -1,136 +1,117 @@
 import { NextResponse } from 'next/server';
-import { supabase } from '@/lib/supabase';
+import { requireHR } from '@/lib/auth/requireHR';
+import { createSupabaseAdminClient } from '@/lib/supabase/admin';
+
+export const dynamic = 'force-dynamic';
 
 export async function GET() {
+  const access = await requireHR('rosters.review');
+  if (!access.ok) {
+    return NextResponse.json({ success: false, error: access.error }, { status: access.status });
+  }
+
   try {
-    // 1. Fetch active personnel count
-    const { count: activePersonnel, error: personnelErr } = await supabase
-      .from('employees')
-      .select('id', { count: 'exact', head: true });
+    const db = createSupabaseAdminClient();
 
-    if (personnelErr) console.warn('Personnel count warning:', personnelErr.message);
+    const [employeesResult, sitesResult, rostersResult] = await Promise.all([
+      db.from('employees').select('id, status'),
+      db.from('sites').select('id, site_name, location, is_active').eq('is_active', true).order('site_name'),
+      db.from('daily_site_rosters')
+        .select('id, site_id, shift_date, status, submitted_by, submitted_at, reviewed_at, version, rejection_reason')
+        .in('status', ['submitted_to_hr', 'approved', 'rejected'])
+        .order('submitted_at', { ascending: false, nullsFirst: false })
+        .limit(50),
+    ]);
 
-    // 2. Fetch pending site roster batches with clerk & site metadata
-    const { data: rosterData, error: rosterErr } = await supabase
-      .from('daily_site_rosters')
-      .select(`
-        id,
-        site_id,
-        clerk_id,
-        roster_date,
-        status,
-        total_workers,
-        timesheet_file_url,
-        created_at,
-        sites ( site_name, location ),
-        profiles ( full_name, email ),
-        daily_roster_entries (
-          id,
-          employee_id,
-          regular_hours,
-          overtime_hours,
-          status,
-          employees ( full_name, employee_code, position )
-        )
-      `)
-      .in('status', ['submitted', 'pending_hr_review', 'flagged'])
-      .order('created_at', { ascending: false })
-      .limit(20);
+    if (employeesResult.error) throw employeesResult.error;
+    if (sitesResult.error) throw sitesResult.error;
+    if (rostersResult.error) throw rostersResult.error;
 
-    if (rosterErr) throw new Error(`Rosters fetch failed: ${rosterErr.message}`);
+    const employees = employeesResult.data || [];
+    const sites = sitesResult.data || [];
+    const rosters = rostersResult.data || [];
+    const siteMap = new Map(sites.map((site) => [site.id, site]));
 
-    // 3. Fetch unverified individual shift logs
-    const { data: shiftData, error: shiftErr } = await supabase
-      .from('shift_logs')
-      .select('*')
-      .order('created_at', { ascending: false })
-      .limit(30);
+    const rosterIds = rosters.map((row) => row.id);
+    const submitterIds = [...new Set(rosters.map((row) => row.submitted_by).filter(Boolean))];
 
-    if (shiftErr) throw new Error(`Shifts fetch failed: ${shiftErr.message}`);
+    let shifts = [];
+    let profiles = [];
 
-    // 4. Format roster batches with aggregated hours & safe backups
-    const formattedPendingRosters = (rosterData || []).map((roster) => {
-      const entries = roster.daily_roster_entries || [];
+    if (rosterIds.length) {
+      const { data, error } = await db
+        .from('shift_logs')
+        .select('daily_roster_id, regular_hours, overtime_hours, worked_hours')
+        .in('daily_roster_id', rosterIds);
+      if (error) throw error;
+      shifts = data || [];
+    }
 
-      // Calculate total regular and overtime hours for the batch
-      const totalRegHours = entries.reduce((sum, e) => sum + Number(e.regular_hours || 0), 0);
-      const totalOtHours = entries.reduce((sum, e) => sum + Number(e.overtime_hours || 0), 0);
+    if (submitterIds.length) {
+      const { data, error } = await db
+        .from('profiles')
+        .select('id, first_name, last_name, email')
+        .in('id', submitterIds);
+      if (error) throw error;
+      profiles = data || [];
+    }
 
-      const siteName = roster.sites?.site_name || 'Unassigned Site';
-      const rosterDate = roster.roster_date || new Date(roster.created_at).toLocaleDateString();
+    const profileMap = new Map(profiles.map((profile) => [profile.id, profile]));
+    const shiftMap = new Map();
+    for (const shift of shifts) {
+      const current = shiftMap.get(shift.daily_roster_id) || { count: 0, regular: 0, overtime: 0, worked: 0 };
+      current.count += 1;
+      current.regular += Number(shift.regular_hours || 0);
+      current.overtime += Number(shift.overtime_hours || 0);
+      current.worked += Number(shift.worked_hours || 0);
+      shiftMap.set(shift.daily_roster_id, current);
+    }
 
+    const formatted = rosters.map((roster) => {
+      const site = siteMap.get(roster.site_id);
+      const submitter = profileMap.get(roster.submitted_by);
+      const totals = shiftMap.get(roster.id) || { count: 0, regular: 0, overtime: 0, worked: 0 };
       return {
-        id: String(roster.id),
-        // Primary properties matching client component expectations
-        site_name: siteName,
-        shift_date: rosterDate,
-        total_workers: roster.total_workers || entries.length || 0,
-        total_regular_hours: totalRegHours,
-        total_overtime_hours: totalOtHours,
-        status: roster.status || 'submitted',
-        timesheet_file_url: roster.timesheet_file_url || null,
-
-        // Additional camelCase metadata
-        rosterDate,
-        submittedAt: roster.created_at,
-        siteName,
-        siteLocation: roster.sites?.location || 'Unknown Location',
-        clerkName: roster.profiles?.full_name || roster.profiles?.email || 'Field Clerk',
-        entries: entries.map((entry) => ({
-          id: String(entry.id),
-          employeeId: entry.employee_id,
-          employeeName: entry.employees?.full_name || 'Unknown Employee',
-          employeeCode: entry.employees?.employee_code || 'N/A',
-          position: entry.employees?.position || 'General Worker',
-          regularHours: entry.regular_hours || 8,
-          overtimeHours: entry.overtime_hours || 0,
-          status: entry.status || 'PENDING',
-        })),
+        id: roster.id,
+        site_id: roster.site_id,
+        site_name: site?.site_name || 'Unknown Site',
+        site_location: site?.location || '',
+        shift_date: roster.shift_date,
+        status: roster.status,
+        submitted_at: roster.submitted_at,
+        submitted_by_name: submitter ? `${submitter.first_name || ''} ${submitter.last_name || ''}`.trim() || submitter.email : 'Unknown Site Clerk',
+        version: roster.version,
+        rejection_reason: roster.rejection_reason,
+        total_workers: totals.count,
+        total_regular_hours: Number(totals.regular.toFixed(2)),
+        total_overtime_hours: Number(totals.overtime.toFixed(2)),
+        total_worked_hours: Number(totals.worked.toFixed(2)),
       };
     });
 
-    // 5. Transform individual shift queue
-    const formattedQueue = (shiftData || []).map((shift) => ({
-      id: String(shift.id),
-      worker: shift.worker_name || shift.employee_name || 'Field Worker',
-      site: shift.site_location || shift.site_name || 'Unassigned Site',
-      type: `${shift.regular_hours || 8}h Reg / ${shift.overtime_hours || 0}h OT`,
-      date: shift.shift_date || new Date(shift.created_at).toLocaleDateString(),
-      status: shift.status || 'PENDING',
-    }));
-
-    // 6. Calculate metrics
-    const pendingRostersCount = formattedPendingRosters.length;
-    const pendingShiftsCount = formattedQueue.filter(
-      (s) => String(s.status).toUpperCase() === 'PENDING'
-    ).length;
-
-    const readyForStaging = formattedQueue.filter(
-      (s) => String(s.status).toUpperCase() === 'APPROVED'
-    ).length;
-
-    const totalItems = pendingShiftsCount + readyForStaging;
-    const readinessPercentage =
-      totalItems > 0 ? Math.round((readyForStaging / totalItems) * 100) : 100;
+    const today = new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'Africa/Gaborone', year: 'numeric', month: '2-digit', day: '2-digit',
+    }).format(new Date());
 
     return NextResponse.json({
       success: true,
-      stats: {
-        activePersonnel: activePersonnel || 0,
-        pendingRostersCount,
-        pendingReviews: pendingShiftsCount,
-        readyForStaging,
-        unmatchedRates: 0,
-        readinessPercentage,
+      data: {
+        hr: access.profile,
+        today,
+        sites,
+        stats: {
+          active_employees: employees.filter((employee) => employee.status === 'Active').length,
+          pending_rosters: formatted.filter((roster) => roster.status === 'submitted_to_hr').length,
+          approved_rosters: formatted.filter((roster) => roster.status === 'approved').length,
+          rejected_rosters: formatted.filter((roster) => roster.status === 'rejected').length,
+          active_sites: sites.length,
+        },
+        pending_rosters: formatted.filter((roster) => roster.status === 'submitted_to_hr').slice(0, 10),
+        recent_rosters: formatted.slice(0, 10),
       },
-      pendingRosters: formattedPendingRosters,
-      pendingQueue: formattedQueue,
     });
-  } catch (err) {
-    console.error('HR Dashboard GET error:', err);
-    return NextResponse.json(
-      { success: false, message: err?.message || 'Database fetch failed' },
-      { status: 500 }
-    );
+  } catch (error) {
+    console.error('HR dashboard error:', error);
+    return NextResponse.json({ success: false, error: 'Failed to load the HR dashboard.' }, { status: 500 });
   }
 }
