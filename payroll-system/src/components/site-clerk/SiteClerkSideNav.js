@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { Building2, CalendarCheck, ChevronRight, HardHat, LayoutDashboard, LogOut, Menu, X } from 'lucide-react';
+import { Building2, CalendarCheck, ChevronRight, FileUp, HardHat, LayoutDashboard, LogOut, Menu, X } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 
 export default function SiteClerkSideNav() {
@@ -12,6 +12,7 @@ export default function SiteClerkSideNav() {
 
   const navItems = [
     { name: 'Dashboard', href: '/dashboard/site-clerk', icon: LayoutDashboard, exact: true },
+    { name: 'Paper Timesheet', href: '/dashboard/site-clerk/timesheet-upload', icon: FileUp },
     { name: 'Daily Roster', href: '/dashboard/site-clerk/roster', icon: CalendarCheck },
   ];
 
@@ -69,7 +70,7 @@ export default function SiteClerkSideNav() {
         <div className="space-y-6">
           <div className="flex items-center gap-3.5 border-b border-slate-100 pb-5"><div className="p-3 rounded-2xl bg-indigo-50 border border-indigo-100 text-indigo-600"><Building2 className="w-6 h-6" /></div><div><h1 className="font-black text-slate-900 text-base">Periscope Mining</h1><p className="text-[11px] text-indigo-600 font-extrabold uppercase tracking-wider">Site Clerk Control</p></div></div>
           {renderLinks()}
-          <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4 text-xs text-slate-500"><span className="font-bold text-slate-700">V1 workflow</span><br />Assigned site → attendance → submit roster to HR.</div>
+          <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4 text-xs text-slate-500"><span className="font-bold text-slate-700">Field workflow</span><br />Paper sheet → extraction → clerk verification → digital roster → HR.</div>
         </div>
         <button onClick={handleLogout} className="w-full flex items-center gap-3.5 px-4 py-3 rounded-2xl text-sm font-bold text-rose-600 hover:bg-rose-50"><LogOut className="w-5 h-5" />Sign Out</button>
       </aside>
