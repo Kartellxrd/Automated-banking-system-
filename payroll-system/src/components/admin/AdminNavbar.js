@@ -3,9 +3,7 @@
 import { useState, useEffect } from 'react';
 import {
   Shield,
-  User,
   X,
-  Building2,
   Calendar,
   Mail,
   ShieldCheck,
@@ -15,10 +13,10 @@ import {
   Activity,
   Copy,
   Check,
-  ExternalLink,
   RotateCcw
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
+import ChangePasswordButton from '@/components/shared/ChangePasswordButton';
 
 export default function AdminNavbar({ title = "Admin Statistics & System Overview" }) {
   const [currentAdmin, setCurrentAdmin] = useState(null);
@@ -53,7 +51,6 @@ export default function AdminNavbar({ title = "Admin Statistics & System Overvie
     }
   };
 
-  // Helper: Extract Initials for Profile Avatar
   const getInitials = () => {
     if (currentAdmin?.first_name && currentAdmin?.last_name) {
       return `${currentAdmin.first_name[0]}${currentAdmin.last_name[0]}`.toUpperCase();
@@ -68,7 +65,6 @@ export default function AdminNavbar({ title = "Admin Statistics & System Overvie
     ? `${currentAdmin?.first_name || ''} ${currentAdmin?.last_name || ''}`.trim()
     : currentAdmin?.email || 'Administrator';
 
-  // Feature 1: Quick Copy Admin System ID to Clipboard
   const handleCopyId = () => {
     if (currentAdmin?.id) {
       navigator.clipboard.writeText(currentAdmin.id);
@@ -77,7 +73,6 @@ export default function AdminNavbar({ title = "Admin Statistics & System Overvie
     }
   };
 
-  // Feature 2: Quick System Audit Export (CSV Download)
   const handleQuickExport = async () => {
     setIsExporting(true);
     try {
@@ -118,10 +113,7 @@ export default function AdminNavbar({ title = "Admin Statistics & System Overvie
 
   return (
     <>
-      {/* Light Navbar Header */}
       <header className="bg-white border border-slate-200 rounded-2xl p-4 sm:p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4 shadow-sm">
-        
-        {/* Title & Badge */}
         <div className="flex items-center space-x-3.5">
           <div className="p-3 rounded-xl bg-indigo-50 border border-indigo-100 text-indigo-600">
             <Shield className="w-6 h-6 text-indigo-600" />
@@ -142,9 +134,7 @@ export default function AdminNavbar({ title = "Admin Statistics & System Overvie
           </div>
         </div>
 
-        {/* Admin Action Group */}
         <div className="flex items-center gap-3">
-          {/* Quick Export Audit Button */}
           <button
             onClick={handleQuickExport}
             disabled={isExporting}
@@ -155,7 +145,8 @@ export default function AdminNavbar({ title = "Admin Statistics & System Overvie
             <span>{isExporting ? 'Exporting...' : 'Export Audit'}</span>
           </button>
 
-          {/* Clickable Profile Badge */}
+          <ChangePasswordButton compact />
+
           <button
             onClick={() => setProfileModalOpen(true)}
             className="flex items-center space-x-3 bg-slate-50 hover:bg-slate-100 border border-slate-200 hover:border-indigo-300 px-3.5 py-2 rounded-xl transition text-left group cursor-pointer shadow-xs"
@@ -179,12 +170,9 @@ export default function AdminNavbar({ title = "Admin Statistics & System Overvie
         </div>
       </header>
 
-      {/* Profile & Quick Admin Tools Modal */}
       {profileModalOpen && (
         <div className="fixed inset-0 z-50 bg-slate-900/40 backdrop-blur-sm flex items-center justify-center p-4">
           <div className="bg-white border border-slate-200 rounded-2xl w-full max-w-md p-6 space-y-5 shadow-2xl relative animate-in fade-in zoom-in duration-150">
-            
-            {/* Modal Close Button */}
             <button
               onClick={() => setProfileModalOpen(false)}
               className="absolute top-4 right-4 p-1.5 text-slate-400 hover:text-slate-700 rounded-lg hover:bg-slate-100 transition"
@@ -192,7 +180,6 @@ export default function AdminNavbar({ title = "Admin Statistics & System Overvie
               <X className="w-5 h-5" />
             </button>
 
-            {/* Profile Header */}
             <div className="flex items-center space-x-4">
               <div className="w-14 h-14 rounded-2xl bg-indigo-600 border border-indigo-400/30 flex items-center justify-center text-white font-extrabold text-xl shadow-lg shadow-indigo-600/20">
                 {getInitials()}
@@ -214,7 +201,6 @@ export default function AdminNavbar({ title = "Admin Statistics & System Overvie
               </div>
             </div>
 
-            {/* Profile Detailed Info Block */}
             <div className="space-y-3 bg-slate-50 p-4 rounded-xl border border-slate-200 text-xs">
               <div className="flex items-center justify-between py-2 border-b border-slate-200">
                 <span className="text-slate-500 flex items-center gap-2">
@@ -263,7 +249,6 @@ export default function AdminNavbar({ title = "Admin Statistics & System Overvie
               </div>
             </div>
 
-            {/* Quick Functional Admin Actions */}
             <div className="space-y-2 pt-1">
               <p className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Quick Actions</p>
               <div className="grid grid-cols-2 gap-2">
@@ -284,7 +269,6 @@ export default function AdminNavbar({ title = "Admin Statistics & System Overvie
               </div>
             </div>
 
-            {/* Footer Button */}
             <div className="pt-2">
               <button
                 onClick={() => setProfileModalOpen(false)}
