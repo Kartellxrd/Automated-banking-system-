@@ -1,8 +1,9 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { Bell, Search, UserCheck } from 'lucide-react';
+import { Bell, Search } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
+import ChangePasswordButton from '@/components/shared/ChangePasswordButton';
 
 export default function HRNavbar() {
   const [userName, setUserName] = useState('HR Manager');
@@ -21,7 +22,6 @@ export default function HRNavbar() {
 
   return (
     <header className="bg-white border-b border-slate-200 px-6 py-4 sticky top-0 z-30 flex items-center justify-between gap-4 shadow-xs">
-      {/* Search Input */}
       <div className="relative flex-1 max-w-md hidden sm:block">
         <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
         <input
@@ -31,12 +31,13 @@ export default function HRNavbar() {
         />
       </div>
 
-      {/* Right Controls */}
-      <div className="flex items-center gap-4 ml-auto">
+      <div className="flex items-center gap-3 ml-auto">
         <button className="relative p-2.5 text-slate-500 hover:text-indigo-600 hover:bg-slate-100 rounded-xl transition cursor-pointer">
           <Bell className="w-5 h-5" />
           <span className="absolute top-2 right-2 w-2 h-2 bg-indigo-600 rounded-full ring-2 ring-white"></span>
         </button>
+
+        <ChangePasswordButton compact />
 
         <div className="h-6 w-px bg-slate-200"></div>
 
