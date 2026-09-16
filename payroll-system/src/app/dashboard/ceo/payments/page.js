@@ -10,6 +10,7 @@ import {
   LockKeyhole,
   CheckCircle2,
   Ban,
+  Layers3,
 } from 'lucide-react';
 import CeoNavbar from '@/components/ceo/CeoNavbar';
 import CeoSideNav from '@/components/ceo/CeoSideNav';
@@ -19,25 +20,45 @@ const money = (value) => `BWP ${Number(value || 0).toLocaleString('en-BW', { min
 export default function CeoPaymentCenterPage() {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [preparingId, setPreparingId] = useState(null);
   const [error, setError] = useState('');
+
+  const load = async () => {
+    setError('');
+    const response = await fetch('/api/ceo/payment-center', { cache: 'no-store' });
+    const json = await response.json();
+    if (!response.ok || !json.success) throw new Error(json.error || 'Failed to load payment center.');
+    setData(json.data);
+  };
 
   useEffect(() => {
     (async () => {
-      try {
-        const response = await fetch('/api/ceo/payment-center', { cache: 'no-store' });
-        const json = await response.json();
-        if (!response.ok || !json.success) throw new Error(json.error || 'Failed to load payment center.');
-        setData(json.data);
-      } catch (err) {
-        setError(err.message || 'Failed to load payment center.');
-      } finally {
-        setLoading(false);
-      }
+      try { await load(); }
+      catch (err) { setError(err.message || 'Failed to load payment center.'); }
+      finally { setLoading(false); }
     })();
   }, []);
 
+  const preparePayrollRun = async (batchId) => {
+    setPreparingId(batchId);
+    setError('');
+    try {
+      const response = await fetch('/api/ceo/payment-center', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'prepare_payroll', batch_id: batchId }),
+      });
+      const json = await response.json();
+      if (!response.ok || !json.success) throw new Error(json.error || 'Failed to prepare payment run.');
+      await load();
+    } catch (err) {
+      setError(err.message || 'Failed to prepare payment run.');
+    } finally {
+      setPreparingId(null);
+    }
+  };
+
   const summary = data?.summary;
-  const executionDisabled = data?.execution?.mode !== 'live';
 
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col lg:flex-row">
@@ -49,28 +70,26 @@ export default function CeoPaymentCenterPage() {
           {loading && <div className="py-20 flex justify-center items-center gap-2 text-slate-500 font-semibold"><Loader2 className="w-5 h-5 animate-spin" /> Loading payment center...</div>}
           {!loading && error && <ErrorBox message={error} />}
 
-          {!loading && !error && data && (
+          {!loading && data && (
             <>
               <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
                 <Stat icon={Users} label="Payroll Recipients" value={summary.payroll_recipients} helper={`${summary.payroll_batches} approved batch(es)`} />
                 <Stat icon={WalletCards} label="Payroll Waiting" value={money(summary.payroll_total)} helper={`${summary.payroll_ready_batches} batch(es) pass payout preflight`} />
+                <Stat icon={Layers3} label="Prepared Payment Runs" value={summary.prepared_payment_runs} helper="Immutable payroll execution plans" />
                 <Stat icon={ReceiptText} label="Expenses Waiting" value={money(summary.expense_total)} helper={`${summary.expense_requests} approved request(s)`} />
-                <Stat icon={CheckCircle2} label="Expense Payment Ready" value={summary.expense_ready_requests} helper="Verified payee destination required" />
               </div>
 
               <div className="bg-amber-50 border border-amber-200 rounded-3xl p-5 sm:p-6 flex items-start gap-3">
                 <LockKeyhole className="w-5 h-5 text-amber-700 mt-0.5 shrink-0" />
                 <div>
-                  <h2 className="font-black text-amber-900">Live payout execution is intentionally disabled</h2>
+                  <h2 className="font-black text-amber-900">Payment orchestration is live; fund movement is not</h2>
                   <p className="text-sm text-amber-800 mt-1">{data.execution.message}</p>
-                  <p className="text-xs text-amber-700 mt-2 font-semibold">The approval workflow and payout preflight are live. We will connect the Pay All action only after the company confirms its corporate payout rail or API.</p>
+                  <p className="text-xs text-amber-700 mt-2 font-semibold">The CEO can prepare and lock a channel-aware payroll run now. The final Execute Pay All action will be enabled only after the company confirms a real corporate payout rail.</p>
                 </div>
               </div>
 
               <section className="space-y-4">
-                <div className="flex items-end justify-between gap-4">
-                  <div><p className="text-xs font-black uppercase tracking-wider text-emerald-600">Payroll</p><h2 className="text-xl font-black text-slate-900 mt-1">Approved Payroll Batches</h2></div>
-                </div>
+                <div><p className="text-xs font-black uppercase tracking-wider text-emerald-600">Payroll</p><h2 className="text-xl font-black text-slate-900 mt-1">Approved Payroll Batches</h2></div>
 
                 {!data.payroll.length ? (
                   <Empty text="No CEO-approved payroll batches are waiting for payment." />
@@ -78,12 +97,22 @@ export default function CeoPaymentCenterPage() {
                   <div key={batch.id} className="bg-white border border-slate-200 rounded-3xl p-5 sm:p-6 shadow-xs space-y-5">
                     <div className="flex flex-col xl:flex-row xl:items-center justify-between gap-5">
                       <div>
-                        <div className="flex flex-wrap items-center gap-2"><h3 className="font-black text-slate-900">{batch.batch_code}</h3>{batch.payment_ready ? <Badge good text="Payout preflight passed" /> : <Badge text={`${batch.payment_blockers} blocker(s)`} />}</div>
+                        <div className="flex flex-wrap items-center gap-2">
+                          <h3 className="font-black text-slate-900">{batch.batch_code}</h3>
+                          {batch.payment_run ? <Badge good text={`Run ${batch.payment_run.run_code} prepared`} /> : batch.payment_ready ? <Badge good text="Payout preflight passed" /> : <Badge text={`${batch.payment_blockers} blocker(s)`} />}
+                        </div>
                         <p className="text-sm text-slate-500 mt-2">{batch.pay_period?.period_name || 'Pay period unavailable'} · {batch.payable_recipients} payable employees</p>
+                        {batch.payment_run && <p className="text-xs text-slate-500 mt-1">Prepared {new Date(batch.payment_run.prepared_at).toLocaleString()} · {batch.payment_run.total_items} items · {money(batch.payment_run.total_amount)}</p>}
                       </div>
                       <div className="flex flex-col sm:flex-row sm:items-center gap-4">
                         <div className="sm:text-right"><p className="text-[10px] font-black uppercase tracking-wider text-slate-400">Net Payroll</p><p className="text-2xl font-black text-slate-900">{money(batch.net_total)}</p></div>
-                        <button disabled={executionDisabled || !batch.payment_ready} title={executionDisabled ? 'Connect a verified corporate payout rail before executing payments.' : undefined} className="px-6 py-3 rounded-xl bg-emerald-600 text-white text-sm font-black disabled:bg-slate-200 disabled:text-slate-500 disabled:cursor-not-allowed">PAY ALL</button>
+                        {batch.payment_run ? (
+                          <button disabled className="px-6 py-3 rounded-xl bg-slate-200 text-slate-500 text-sm font-black cursor-not-allowed">EXECUTION AWAITS ADAPTER</button>
+                        ) : (
+                          <button onClick={() => preparePayrollRun(batch.id)} disabled={!batch.payment_ready || preparingId === batch.id} className="px-6 py-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-black disabled:bg-slate-200 disabled:text-slate-500 disabled:cursor-not-allowed flex items-center justify-center gap-2">
+                            {preparingId === batch.id ? <Loader2 className="w-4 h-4 animate-spin" /> : <Layers3 className="w-4 h-4" />} PREPARE PAY ALL
+                          </button>
+                        )}
                       </div>
                     </div>
 
