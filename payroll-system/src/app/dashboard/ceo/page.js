@@ -1,171 +1,167 @@
 'use client';
 
-import { useState } from 'react';
-import {
-  BarChart3,
-  ShieldCheck,
-  TrendingUp,
-  Building,
-  CheckCircle2,
-  ArrowUpRight,
-  DollarSign
-} from 'lucide-react';
+import { useEffect, useState } from 'react';
 import Link from 'next/link';
-
+import {
+  Building2,
+  Users,
+  ShieldCheck,
+  ReceiptText,
+  WalletCards,
+  ArrowUpRight,
+  Loader2,
+  AlertCircle,
+} from 'lucide-react';
 import CeoNavbar from '@/components/ceo/CeoNavbar';
 import CeoSideNav from '@/components/ceo/CeoSideNav';
 
-export default function CeoOverviewPage() {
-  const [metrics] = useState({
-    totalLaborSpend: 428950.00,
-    activeSites: 4,
-    totalWorkers: 184,
-    pendingAuthCount: 2,
-    complianceFlags: 0,
-  });
+const money = (value) => `BWP ${Number(value || 0).toLocaleString('en-BW', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
-  const [siteExpenditures] = useState([
-    { site: 'Jwaneng Open Pit Operation', code: 'JWN-01', laborSpend: 185400.00, workers: 72, variance: '+2.4%' },
-    { site: 'Orapa Processing Plant', code: 'ORP-02', laborSpend: 142150.00, workers: 58, variance: '-1.1%' },
-    { site: 'Letlhakane Shaft Expansion', code: 'LTK-03', laborSpend: 62400.00, workers: 32, variance: '+0.8%' },
-    { site: 'Damtshaa Logistics Hub', code: 'DMT-04', laborSpend: 39000.00, workers: 22, variance: '0.0%' },
-  ]);
+export default function CeoOverviewPage() {
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    let active = true;
+    (async () => {
+      try {
+        const response = await fetch('/api/ceo/dashboard', { cache: 'no-store' });
+        const json = await response.json();
+        if (!response.ok || !json.success) throw new Error(json.error || 'Failed to load dashboard.');
+        if (active) setData(json.data);
+      } catch (err) {
+        if (active) setError(err.message || 'Failed to load dashboard.');
+      } finally {
+        if (active) setLoading(false);
+      }
+    })();
+    return () => { active = false; };
+  }, []);
+
+  const metrics = data?.metrics;
 
   return (
-    <div className="min-h-screen bg-slate-50 flex flex-col lg:flex-row font-sans">
-      {/* Sidebar Navigation */}
+    <div className="min-h-screen bg-slate-50 flex flex-col lg:flex-row">
       <CeoSideNav />
+      <div className="flex-1 min-w-0">
+        <CeoNavbar title="Executive Overview" subtitle="Live CEO approvals, payment readiness, workforce and site totals" />
 
-      {/* Main Content Area */}
-      <div className="flex-1 flex flex-col min-w-0">
-        {/* Top Navbar Header */}
-        <CeoNavbar
-          title="Executive Overview"
-          subtitle="High-level spending totals, site labor expenditure, and strategic gate controls"
-        />
+        <main className="p-4 sm:p-6 lg:p-8 max-w-7xl mx-auto space-y-6">
+          {loading && (
+            <div className="min-h-[320px] flex items-center justify-center text-slate-500 gap-2 text-sm font-semibold">
+              <Loader2 className="w-5 h-5 animate-spin" /> Loading live executive data...
+            </div>
+          )}
 
-        {/* Page Body Content */}
-        <main className="p-4 sm:p-6 lg:p-8 space-y-6 max-w-7xl w-full mx-auto">
-          {/* Executive Metric Cards */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-            <div className="bg-white border border-slate-200 p-6 rounded-3xl shadow-xs">
-              <div className="flex items-center justify-between text-slate-500 mb-2">
-                <span className="text-xs font-extrabold uppercase tracking-wider">Total Labor Spend</span>
-                <div className="p-2 rounded-xl bg-emerald-50 text-emerald-600 border border-emerald-100">
-                  <DollarSign className="w-4 h-4" />
+          {!loading && error && (
+            <div className="bg-rose-50 border border-rose-200 text-rose-700 rounded-2xl p-4 flex items-start gap-3">
+              <AlertCircle className="w-5 h-5 mt-0.5" />
+              <div><p className="font-bold">Could not load CEO dashboard</p><p className="text-sm mt-1">{error}</p></div>
+            </div>
+          )}
+
+          {!loading && !error && metrics && (
+            <>
+              <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
+                <MetricCard icon={Building2} label="Active Sites" value={metrics.active_sites} helper={`${metrics.active_employees} active employees`} />
+                <MetricCard icon={ShieldCheck} label="Payroll Awaiting Review" value={metrics.payroll_awaiting_review} helper="Accountant-submitted batches" />
+                <MetricCard icon={ReceiptText} label="Expenses Awaiting Review" value={metrics.expenses_awaiting_review} helper="Accountant-reviewed requests" />
+                <MetricCard icon={WalletCards} label="Approved Outflows" value={metrics.payroll_ready_to_pay + metrics.expenses_ready_to_pay} helper={`${money(metrics.payroll_ready_to_pay_total + metrics.expenses_ready_to_pay_total)} waiting for payment`} />
+              </div>
+
+              <div className="grid grid-cols-1 xl:grid-cols-2 gap-5">
+                <ActionPanel
+                  title="Payroll Approval"
+                  description="Review payroll batches prepared from HR-approved rosters before they can enter payment execution."
+                  count={metrics.payroll_awaiting_review}
+                  href="/dashboard/ceo/review"
+                  button="Review Payroll"
+                />
+                <ActionPanel
+                  title="Expense Approval"
+                  description="Review site expense requests that the Accountant has checked and recommended for CEO approval."
+                  count={metrics.expenses_awaiting_review}
+                  href="/dashboard/ceo/expenses"
+                  button="Review Expenses"
+                />
+              </div>
+
+              <div className="bg-slate-900 text-white rounded-3xl p-6 sm:p-8 flex flex-col md:flex-row md:items-center justify-between gap-5">
+                <div>
+                  <p className="text-xs font-black uppercase tracking-widest text-emerald-400">Payment Center</p>
+                  <h2 className="text-xl font-black mt-2">{money(metrics.payroll_ready_to_pay_total + metrics.expenses_ready_to_pay_total)} approved and waiting</h2>
+                  <p className="text-sm text-slate-300 mt-2 max-w-2xl">
+                    Payroll and approved expenses are separated into payment-ready queues. Live execution stays disabled until a verified corporate payout rail is connected.
+                  </p>
                 </div>
+                <Link href="/dashboard/ceo/payments" className="inline-flex items-center justify-center gap-2 px-5 py-3 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black text-sm shrink-0">
+                  Open Payment Center <ArrowUpRight className="w-4 h-4" />
+                </Link>
               </div>
-              <h3 className="text-2xl font-black text-slate-900">
-                BWP {metrics.totalLaborSpend.toLocaleString('en-BW', { minimumFractionDigits: 2 })}
-              </h3>
-              <span className="text-[11px] text-emerald-600 font-bold mt-2 inline-flex items-center gap-1">
-                <TrendingUp className="w-3.5 h-3.5" /> Within budgeted threshold
-              </span>
-            </div>
 
-            <div className="bg-white border border-slate-200 p-6 rounded-3xl shadow-xs">
-              <div className="flex items-center justify-between text-slate-500 mb-2">
-                <span className="text-xs font-extrabold uppercase tracking-wider">Pending Batch Auth</span>
-                <div className="p-2 rounded-xl bg-amber-50 text-amber-600 border border-amber-100">
-                  <ShieldCheck className="w-4 h-4" />
-                </div>
+              <div className="grid grid-cols-1 xl:grid-cols-2 gap-5">
+                <RecentTable title="Recent Payroll" empty="No payroll has reached the CEO yet." rows={(data.recent_payroll || []).map((row) => ({
+                  id: row.batch_code,
+                  status: row.status,
+                  amount: row.net_total,
+                }))} />
+                <RecentTable title="Recent Expenses" empty="No expense requests have reached the CEO yet." rows={(data.recent_expenses || []).map((row) => ({
+                  id: row.request_code,
+                  status: row.status,
+                  amount: row.approved_amount ?? row.accountant_recommended_amount ?? row.requested_amount,
+                }))} />
               </div>
-              <h3 className="text-2xl font-black text-amber-600">{metrics.pendingAuthCount} Batches</h3>
-              <p className="text-[11px] text-slate-500 font-medium mt-2">Awaiting final executive release</p>
-            </div>
-
-            <div className="bg-white border border-slate-200 p-6 rounded-3xl shadow-xs">
-              <div className="flex items-center justify-between text-slate-500 mb-2">
-                <span className="text-xs font-extrabold uppercase tracking-wider">Active Operations</span>
-                <div className="p-2 rounded-xl bg-indigo-50 text-indigo-600 border border-indigo-100">
-                  <Building className="w-4 h-4" />
-                </div>
-              </div>
-              <h3 className="text-2xl font-black text-slate-900">{metrics.activeSites} Sites</h3>
-              <p className="text-[11px] text-slate-500 font-medium mt-2">{metrics.totalWorkers} Active Personnel</p>
-            </div>
-
-            <div className="bg-white border border-slate-200 p-6 rounded-3xl shadow-xs">
-              <div className="flex items-center justify-between text-slate-500 mb-2">
-                <span className="text-xs font-extrabold uppercase tracking-wider">Compliance Status</span>
-                <div className="p-2 rounded-xl bg-emerald-50 text-emerald-600 border border-emerald-100">
-                  <CheckCircle2 className="w-4 h-4" />
-                </div>
-              </div>
-              <h3 className="text-2xl font-black text-emerald-600">{metrics.complianceFlags} Flags</h3>
-              <p className="text-[11px] text-emerald-700 font-bold mt-2">Audited & Verified</p>
-            </div>
-          </div>
-
-          {/* Strategic Action Callout */}
-          <div className="bg-slate-900 text-white p-6 sm:p-8 rounded-3xl shadow-md flex flex-col md:flex-row items-start md:items-center justify-between gap-6">
-            <div className="space-y-2">
-              <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-500/10 text-emerald-400 text-xs font-extrabold uppercase tracking-wider border border-emerald-500/20">
-                <ShieldCheck className="w-4 h-4" /> Strategic Gate Active
-              </span>
-              <h2 className="text-xl font-black tracking-tight">{metrics.pendingAuthCount} Payroll Batches Staged for Final Release</h2>
-              <p className="text-xs text-slate-300 max-w-xl">
-                Cross-check labor variance and issue dual-key verification before executing payout transfers.
-              </p>
-            </div>
-
-            <Link
-              href="/dashboard/ceo/review"
-              className="px-6 py-3.5 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-extrabold text-xs rounded-2xl transition shadow-lg shadow-emerald-500/20 flex items-center gap-2 shrink-0"
-            >
-              Go to Batch Authorization <ArrowUpRight className="w-4 h-4" />
-            </Link>
-          </div>
-
-          {/* Site Expenditure Table */}
-          <div className="bg-white border border-slate-200 rounded-3xl p-6 shadow-xs space-y-4">
-            <div className="flex items-center justify-between">
-              <div>
-                <h3 className="text-base font-extrabold text-slate-900">Site-by-Site Labor Expenditure</h3>
-                <p className="text-xs text-slate-500">Breakdown of mining operations and active payroll cost allocations</p>
-              </div>
-              <BarChart3 className="w-5 h-5 text-slate-400" />
-            </div>
-
-            <div className="overflow-x-auto">
-              <table className="w-full text-left border-collapse">
-                <thead>
-                  <tr className="border-b border-slate-100 text-[11px] font-black uppercase text-slate-400 tracking-wider">
-                    <th className="py-3 px-4">Site Name</th>
-                    <th className="py-3 px-4">Site Code</th>
-                    <th className="py-3 px-4">Headcount</th>
-                    <th className="py-3 px-4">Expenditure (BWP)</th>
-                    <th className="py-3 px-4 text-right">Variance vs Budget</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100 text-xs font-medium text-slate-700">
-                  {siteExpenditures.map((site) => (
-                    <tr key={site.code} className="hover:bg-slate-50/80 transition">
-                      <td className="py-3.5 px-4 font-bold text-slate-900">{site.site}</td>
-                      <td className="py-3.5 px-4 font-mono text-slate-500">{site.code}</td>
-                      <td className="py-3.5 px-4 font-semibold">{site.workers} Personnel</td>
-                      <td className="py-3.5 px-4 font-black text-slate-900">
-                        BWP {site.laborSpend.toLocaleString('en-BW', { minimumFractionDigits: 2 })}
-                      </td>
-                      <td className="py-3.5 px-4 text-right">
-                        <span
-                          className={`inline-block px-2.5 py-1 rounded-lg text-[11px] font-bold ${
-                            site.variance.startsWith('+')
-                              ? 'bg-amber-50 text-amber-700 border border-amber-200'
-                              : 'bg-emerald-50 text-emerald-700 border border-emerald-200'
-                          }`}
-                        >
-                          {site.variance}
-                        </span>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
+            </>
+          )}
         </main>
       </div>
+    </div>
+  );
+}
+
+function MetricCard({ icon: Icon, label, value, helper }) {
+  return (
+    <div className="bg-white border border-slate-200 rounded-3xl p-5 shadow-xs">
+      <div className="flex items-center justify-between gap-3">
+        <span className="text-[11px] font-black uppercase tracking-wider text-slate-400">{label}</span>
+        <div className="p-2 rounded-xl bg-emerald-50 text-emerald-600 border border-emerald-100"><Icon className="w-4 h-4" /></div>
+      </div>
+      <p className="text-3xl font-black text-slate-900 mt-3">{value}</p>
+      <p className="text-xs text-slate-500 mt-2 font-medium">{helper}</p>
+    </div>
+  );
+}
+
+function ActionPanel({ title, description, count, href, button }) {
+  return (
+    <div className="bg-white border border-slate-200 rounded-3xl p-6 shadow-xs">
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <h3 className="text-base font-black text-slate-900">{title}</h3>
+          <p className="text-sm text-slate-500 mt-2">{description}</p>
+        </div>
+        <span className="min-w-10 h-10 px-3 rounded-2xl bg-amber-50 text-amber-700 border border-amber-200 flex items-center justify-center font-black">{count}</span>
+      </div>
+      <Link href={href} className="mt-5 inline-flex items-center gap-2 text-sm font-black text-emerald-700 hover:text-emerald-600">{button} <ArrowUpRight className="w-4 h-4" /></Link>
+    </div>
+  );
+}
+
+function RecentTable({ title, rows, empty }) {
+  return (
+    <div className="bg-white border border-slate-200 rounded-3xl p-5 shadow-xs">
+      <h3 className="font-black text-slate-900">{title}</h3>
+      {!rows.length ? <p className="text-sm text-slate-500 mt-4">{empty}</p> : (
+        <div className="mt-4 divide-y divide-slate-100">
+          {rows.map((row) => (
+            <div key={row.id} className="py-3 flex items-center justify-between gap-3">
+              <div><p className="text-sm font-bold text-slate-800">{row.id}</p><p className="text-[11px] text-slate-500 mt-0.5">{String(row.status).replaceAll('_', ' ')}</p></div>
+              <span className="text-sm font-black text-slate-900">{money(row.amount)}</span>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
