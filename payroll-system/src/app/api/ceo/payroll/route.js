@@ -24,7 +24,7 @@ export async function GET() {
     const db = createSupabaseAdminClient();
     const { data: batches, error: batchError } = await db
       .from('payroll_batches')
-      .select('id,batch_code,pay_period_id,status,submitted_by,submitted_at,ceo_reviewed_by,ceo_reviewed_at,ceo_rejection_reason,total_employees,total_regular_hours,total_overtime_hours,gross_total,deductions_total,net_total,execution_started_at,execution_completed_at,created_at,updated_at')
+      .select('id,batch_code,pay_period_id,status,scheduled_payment_date,submitted_by,submitted_at,ceo_reviewed_by,ceo_reviewed_at,ceo_rejection_reason,total_employees,total_regular_hours,total_overtime_hours,gross_total,deductions_total,net_total,execution_started_at,execution_completed_at,created_at,updated_at')
       .in('status', CEO_VISIBLE_STATUSES)
       .order('created_at', { ascending: false })
       .limit(100);
