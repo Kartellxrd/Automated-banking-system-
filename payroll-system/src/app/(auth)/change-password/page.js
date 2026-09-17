@@ -66,15 +66,17 @@ function ChangePasswordContent() {
         throw new Error(result.error || 'Could not update password.');
       }
 
-      setMessage({ type: 'success', text: 'Password updated. Redirecting to sign in...' });
-      await supabase.auth.signOut();
+      const target = result.redirect_to || '/dashboard';
+      setMessage({ type: 'success', text: 'Password updated successfully. Opening your dashboard...' });
 
+      // Keep the authenticated session alive. The middleware will also enforce the
+      // user's role boundary, so a Site Clerk lands only on the Site Clerk dashboard,
+      // HR on HR, Accountant on Accountant, CEO on CEO, and Admin on Admin.
       setTimeout(() => {
-        window.location.href = '/login';
-      }, 1200);
+        window.location.replace(target);
+      }, 700);
     } catch (error) {
-      setMessage({ type: 'error', text: error.message });
-    } finally {
+      setMessage({ type: 'error', text: error.message || 'Could not update password.' });
       setLoading(false);
     }
   }
@@ -103,7 +105,7 @@ function ChangePasswordContent() {
 
         {!message.text && !ready ? (
           <div className="flex items-center justify-center gap-2 py-8 text-sm text-slate-400">
-            <Loader2 className="h-4 w-4 animate-spin" /> Verifying reset link...
+            <Loader2 className="h-4 w-4 animate-spin" /> Verifying your account session...
           </div>
         ) : ready ? (
           <form onSubmit={handleSubmit} className="space-y-4">
@@ -113,9 +115,11 @@ function ChangePasswordContent() {
                 type="password"
                 required
                 minLength={10}
+                autoComplete="new-password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-3 text-sm outline-none focus:border-indigo-500"
+                disabled={loading}
+                className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-3 text-sm outline-none focus:border-indigo-500 disabled:opacity-60"
                 placeholder="Minimum 10 characters"
               />
             </label>
@@ -126,9 +130,11 @@ function ChangePasswordContent() {
                 type="password"
                 required
                 minLength={10}
+                autoComplete="new-password"
                 value={confirmPassword}
                 onChange={(e) => setConfirmPassword(e.target.value)}
-                className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-3 text-sm outline-none focus:border-indigo-500"
+                disabled={loading}
+                className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-3 text-sm outline-none focus:border-indigo-500 disabled:opacity-60"
                 placeholder="Repeat new password"
               />
             </label>
@@ -139,7 +145,7 @@ function ChangePasswordContent() {
               className="mt-2 inline-flex w-full items-center justify-center gap-2 rounded-xl bg-indigo-600 px-4 py-3 text-sm font-semibold text-white hover:bg-indigo-500 disabled:opacity-60"
             >
               {loading && <Loader2 className="h-4 w-4 animate-spin" />}
-              Update Password
+              {loading ? 'Updating Password...' : 'Update Password'}
             </button>
           </form>
         ) : null}
