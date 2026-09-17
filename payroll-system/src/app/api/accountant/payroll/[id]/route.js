@@ -8,7 +8,7 @@ export const dynamic = 'force-dynamic';
 async function loadBatch(db, id) {
   const { data: batch, error: batchError } = await db
     .from('payroll_batches')
-    .select('id, batch_code, pay_period_id, status, created_by, submitted_by, submitted_at, ceo_reviewed_by, ceo_reviewed_at, ceo_rejection_reason, total_employees, total_regular_hours, total_overtime_hours, gross_total, deductions_total, net_total, created_at, updated_at')
+    .select('id, batch_code, pay_period_id, status, scheduled_payment_date, created_by, submitted_by, submitted_at, ceo_reviewed_by, ceo_reviewed_at, ceo_rejection_reason, total_employees, total_regular_hours, total_overtime_hours, gross_total, deductions_total, net_total, created_at, updated_at')
     .eq('id', id)
     .maybeSingle();
   if (batchError) throw batchError;
@@ -103,8 +103,8 @@ async function loadBatch(db, id) {
     pay_period: periodResult.data || null,
     entries: formattedEntries,
     rosters,
-    blockers: { missing_payout_profiles: missingPayouts },
-    can_submit_to_ceo: ['draft', 'rejected_by_ceo'].includes(batch.status) && missingPayouts === 0,
+    blockers: { missing_payout_profiles: missingPayouts, missing_pay_date: batch.scheduled_payment_date ? 0 : 1 },
+    can_submit_to_ceo: ['draft', 'rejected_by_ceo'].includes(batch.status) && missingPayouts === 0 && Boolean(batch.scheduled_payment_date),
   };
 }
 
@@ -134,9 +134,34 @@ export async function PATCH(request, context) {
     const action = String(body.action || '').toLowerCase();
     const db = createSupabaseAdminClient();
 
-    const { data: current, error: currentError } = await db.from('payroll_batches').select('id, batch_code, status').eq('id', id).maybeSingle();
+    const { data: current, error: currentError } = await db.from('payroll_batches').select('id, batch_code, status, scheduled_payment_date').eq('id', id).maybeSingle();
     if (currentError) throw currentError;
     if (!current) return NextResponse.json({ success: false, error: 'Payroll batch not found.' }, { status: 404 });
+
+    if (action === 'set_pay_date') {
+      if (!['draft', 'rejected_by_ceo'].includes(current.status)) {
+        return NextResponse.json({ success: false, error: 'The scheduled payday can only be changed before CEO approval.' }, { status: 409 });
+      }
+      const scheduledPaymentDate = String(body.scheduled_payment_date || '').trim();
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(scheduledPaymentDate)) {
+        return NextResponse.json({ success: false, error: 'Select a valid scheduled payday.' }, { status: 400 });
+      }
+
+      const { error: updateError } = await db.from('payroll_batches').update({ scheduled_payment_date: scheduledPaymentDate, updated_at: new Date().toISOString() }).eq('id', id);
+      if (updateError) throw updateError;
+
+      await writeAuditLog(db, {
+        actorUserId: access.user.id,
+        action: 'SET_PAYROLL_PAYMENT_DATE',
+        module: 'Payroll & Finance',
+        entityType: 'payroll_batches',
+        entityId: id,
+        details: `Set payroll ${current.batch_code} payment date to ${scheduledPaymentDate}.`,
+        metadata: { previous_date: current.scheduled_payment_date || null, scheduled_payment_date: scheduledPaymentDate },
+      });
+
+      return NextResponse.json({ success: true, data: await loadBatch(db, id), message: 'Scheduled payday updated.' });
+    }
 
     if (action === 'refresh_payouts') {
       if (!['draft', 'rejected_by_ceo'].includes(current.status)) {
@@ -189,6 +214,10 @@ export async function PATCH(request, context) {
     }
 
     if (action === 'submit_to_ceo') {
+      if (!current.scheduled_payment_date) {
+        return NextResponse.json({ success: false, error: 'Set the scheduled payday before submitting payroll to the CEO.' }, { status: 400 });
+      }
+
       const { data: batch, error } = await db.rpc('accountant_submit_payroll_batch', {
         p_accountant_id: access.user.id,
         p_batch_id: id,
@@ -202,7 +231,7 @@ export async function PATCH(request, context) {
         entityType: 'payroll_batches',
         entityId: id,
         details: `Submitted payroll batch ${current.batch_code} to CEO for final approval.`,
-        metadata: { previous_status: current.status, new_status: batch.status, net_total: batch.net_total },
+        metadata: { previous_status: current.status, new_status: batch.status, scheduled_payment_date: current.scheduled_payment_date, net_total: batch.net_total },
       });
 
       return NextResponse.json({ success: true, data: batch, message: 'Payroll batch submitted to CEO.' });
