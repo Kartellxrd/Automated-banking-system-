@@ -2,13 +2,12 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import {
-  ShieldCheck,
+  CalendarDays,
   CheckCircle2,
   XCircle,
   Loader2,
   Search,
   AlertCircle,
-  Users,
   WalletCards,
 } from 'lucide-react';
 import CeoNavbar from '@/components/ceo/CeoNavbar';
@@ -16,6 +15,7 @@ import CeoSideNav from '@/components/ceo/CeoSideNav';
 
 const money = (value) => `BWP ${Number(value || 0).toLocaleString('en-BW', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 const prettyStatus = (value) => String(value || '').replaceAll('_', ' ');
+const dateLabel = (value) => value ? new Date(`${value}T12:00:00`).toLocaleDateString('en-BW', { day: '2-digit', month: 'short', year: 'numeric' }) : 'Not scheduled';
 
 export default function CeoPayrollApprovalPage() {
   const [queue, setQueue] = useState([]);
@@ -101,7 +101,7 @@ export default function CeoPayrollApprovalPage() {
     <div className="min-h-screen bg-slate-50 flex flex-col lg:flex-row">
       <CeoSideNav />
       <div className="flex-1 min-w-0">
-        <CeoNavbar title="Payroll Approval" subtitle="Final CEO review of Accountant-prepared payroll batches" />
+        <CeoNavbar title="Payroll Approval" subtitle="Review payroll, target payday and payout readiness before release" />
         <main className="p-4 sm:p-6 lg:p-8 max-w-7xl mx-auto space-y-6">
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
             <Stat label="Awaiting CEO" value={summary.awaiting_review || 0} />
@@ -132,6 +132,7 @@ export default function CeoPayrollApprovalPage() {
                       <Status value={batch.status} />
                     </div>
                     <p className="text-sm text-slate-500 mt-2">{batch.pay_period?.period_name || 'Pay period unavailable'} · {batch.total_employees} employees</p>
+                    <p className="text-xs text-indigo-700 font-bold mt-1 inline-flex items-center gap-1.5"><CalendarDays className="w-3.5 h-3.5" />Scheduled payday: {dateLabel(batch.scheduled_payment_date)}</p>
                     <p className="text-xs text-slate-400 mt-1">Submitted by {batch.submitted_by_profile?.name || 'Accountant'} {batch.submitted_at ? `· ${new Date(batch.submitted_at).toLocaleString()}` : ''}</p>
                   </div>
                   <div className="flex flex-col sm:flex-row sm:items-center gap-4 shrink-0">
@@ -154,11 +155,12 @@ export default function CeoPayrollApprovalPage() {
             </div>
 
             <div className="p-5 sm:p-6 space-y-6">
-              <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+              <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
                 <Mini label="Employees" value={selected.total_employees} />
                 <Mini label="Regular Hours" value={selected.total_regular_hours} />
                 <Mini label="Overtime Hours" value={selected.total_overtime_hours} />
                 <Mini label="Net Payroll" value={money(selected.net_total)} />
+                <Mini label="Pay Date" value={dateLabel(selected.scheduled_payment_date)} />
               </div>
 
               <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4">
@@ -189,7 +191,7 @@ export default function CeoPayrollApprovalPage() {
                   <textarea value={rejectReason} onChange={(e) => setRejectReason(e.target.value)} placeholder="Rejection reason (required only when rejecting)..." rows={3} className="w-full rounded-xl border border-slate-200 bg-slate-50 p-3 text-sm outline-none focus:border-emerald-500" />
                   <div className="flex flex-col sm:flex-row gap-3 sm:justify-end">
                     <button onClick={() => review('reject')} disabled={submitting} className="px-5 py-3 rounded-xl bg-rose-50 border border-rose-200 text-rose-700 font-black text-sm disabled:opacity-50 flex items-center justify-center gap-2"><XCircle className="w-4 h-4" /> Reject & Return</button>
-                    <button onClick={() => review('approve')} disabled={submitting || selected.blockers?.missing_payout_profiles > 0} className="px-5 py-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-black text-sm disabled:opacity-50 flex items-center justify-center gap-2">{submitting ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle2 className="w-4 h-4" />} Approve for Payment</button>
+                    <button onClick={() => review('approve')} disabled={submitting || selected.blockers?.missing_payout_profiles > 0 || !selected.scheduled_payment_date} className="px-5 py-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-black text-sm disabled:opacity-50 flex items-center justify-center gap-2">{submitting ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle2 className="w-4 h-4" />} Approve for Payment</button>
                   </div>
                 </div>
               )}
