@@ -14,7 +14,7 @@ export default function AccSideNav() {
   const navItems = [
     { name: 'Dashboard', href: '/dashboard/accountant', icon: Calculator, exact: true },
     { name: 'Payroll Preparation', href: '/dashboard/accountant/staging', icon: FileCheck2 },
-    { name: 'Payment Execution', href: '/dashboard/accountant/payments', icon: CreditCard },
+    { name: 'Payment Processing', href: '/dashboard/accountant/payments', icon: CreditCard },
     { name: 'Expense Requests', href: '/dashboard/accountant/expense-requests', icon: Banknote, exact: true },
     { name: 'Expense Payees', href: '/dashboard/accountant/expense-payees', icon: UserCheck },
     { name: 'Expenses Ledger', href: '/dashboard/accountant/expenses', icon: Receipt },
