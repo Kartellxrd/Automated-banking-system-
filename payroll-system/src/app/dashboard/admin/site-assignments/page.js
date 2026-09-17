@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { AlertCircle, ArrowRightLeft, Building2, CheckCircle2, Loader2, RefreshCw, Search, Unlink, UserCheck, X } from 'lucide-react';
 import AdminNavbar from '@/components/admin/AdminNavbar';
 import AdminSideNav from '@/components/admin/AdminSideNav';
+import ConfirmDialog from '@/components/shared/ConfirmDialog';
 
 const inputClass = 'w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm text-slate-900 outline-none transition focus:border-indigo-500 focus:bg-white focus:ring-2 focus:ring-indigo-100';
 
@@ -22,6 +23,7 @@ export default function SiteAssignmentsPage() {
   const [saving, setSaving] = useState(false);
   const [busySiteId, setBusySiteId] = useState(null);
   const [message, setMessage] = useState({ type: '', text: '' });
+  const [confirmation, setConfirmation] = useState(null);
 
   async function load() {
     setLoading(true);
@@ -64,9 +66,10 @@ export default function SiteAssignmentsPage() {
     setUserId(current?.user_id || '');
   }
 
-  async function saveAssignment(event) {
+  function saveAssignment(event) {
     event.preventDefault();
     if (!siteId || !userId) return;
+
     const site = siteById.get(siteId);
     const clerk = clerkById.get(userId);
     const current = assignmentBySite.get(siteId);
@@ -74,18 +77,29 @@ export default function SiteAssignmentsPage() {
     const clerkOtherAssignment = assignments.find((item) => item.user_id === userId && item.site_id !== siteId);
     const otherSite = clerkOtherAssignment ? siteById.get(clerkOtherAssignment.site_id) : null;
 
-    let prompt = `Assign ${nameOf(clerk)} to ${site?.site_name}?`;
-    if (currentClerk && currentClerk.id !== userId) prompt += ` This will unassign ${nameOf(currentClerk)}.`;
-    if (otherSite) prompt += ` ${nameOf(clerk)} will also be moved from ${otherSite.site_name}.`;
-    if (!window.confirm(prompt)) return;
+    let detail = `Assign ${nameOf(clerk)} to ${site?.site_name}?`;
+    if (currentClerk && currentClerk.id !== userId) detail += ` ${nameOf(currentClerk)} will be unassigned from this site.`;
+    if (otherSite) detail += ` ${nameOf(clerk)} will also be moved from ${otherSite.site_name}.`;
 
+    setConfirmation({
+      type: 'assign',
+      title: current ? 'Confirm Site Reassignment' : 'Confirm Site Assignment',
+      message: detail,
+      confirmLabel: current ? 'Reassign Clerk' : 'Assign Clerk',
+      tone: current || otherSite ? 'warning' : 'default',
+      siteId,
+      userId,
+    });
+  }
+
+  async function performAssignment(target) {
     setSaving(true);
     setMessage({ type: '', text: '' });
     try {
       const response = await fetch('/api/admin/site-assignments', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ site_id: siteId, user_id: userId }),
+        body: JSON.stringify({ site_id: target.siteId, user_id: target.userId }),
       });
       const result = await response.json();
       if (!response.ok || !result.success) throw new Error(result.error || 'Failed to save assignment.');
@@ -97,14 +111,25 @@ export default function SiteAssignmentsPage() {
       setMessage({ type: 'error', text: error.message });
     } finally {
       setSaving(false);
+      setConfirmation(null);
     }
   }
 
-  async function unassign(site) {
+  function unassign(site) {
     const assignment = assignmentBySite.get(site.id);
     const clerk = assignment ? clerkById.get(assignment.user_id) : null;
-    if (!assignment || !window.confirm(`Unassign ${nameOf(clerk)} from ${site.site_name}?`)) return;
+    if (!assignment) return;
+    setConfirmation({
+      type: 'unassign',
+      title: 'Unassign Site Clerk',
+      message: `Remove ${nameOf(clerk)} from ${site.site_name}? The historical assignment record will be preserved, but the clerk will immediately lose this active site assignment.`,
+      confirmLabel: 'Unassign Clerk',
+      tone: 'danger',
+      site,
+    });
+  }
 
+  async function performUnassign(site) {
     setBusySiteId(site.id);
     setMessage({ type: '', text: '' });
     try {
@@ -117,8 +142,18 @@ export default function SiteAssignmentsPage() {
       setMessage({ type: 'error', text: error.message });
     } finally {
       setBusySiteId(null);
+      setConfirmation(null);
     }
   }
+
+  async function confirmCurrentAction() {
+    const target = confirmation;
+    if (!target) return;
+    if (target.type === 'assign') await performAssignment(target);
+    if (target.type === 'unassign') await performUnassign(target.site);
+  }
+
+  const confirmBusy = confirmation?.type === 'assign' ? saving : Boolean(busySiteId);
 
   return (
     <div className="min-h-screen bg-slate-100 text-slate-900 flex flex-col lg:flex-row">
@@ -148,6 +183,17 @@ export default function SiteAssignmentsPage() {
           <div className="overflow-x-auto"><table className="w-full min-w-[760px] text-sm"><thead className="bg-slate-50 text-xs uppercase text-slate-500"><tr><th className="px-5 py-3 text-left">Site</th><th className="px-5 py-3 text-left">Location</th><th className="px-5 py-3 text-left">Site Clerk</th><th className="px-5 py-3 text-left">Assigned</th><th className="px-5 py-3 text-right">Action</th></tr></thead><tbody className="divide-y divide-slate-100">{loading ? <tr><td colSpan="5" className="px-5 py-12 text-center text-slate-500"><Loader2 className="h-5 w-5 animate-spin inline mr-2" />Loading...</td></tr> : visibleSites.map((site) => { const assignment = assignmentBySite.get(site.id); const clerk = assignment ? clerkById.get(assignment.user_id) : null; return <tr key={site.id} className="hover:bg-slate-50/70"><td className="px-5 py-4 font-semibold">{site.site_name}<div className="text-[10px] mt-1 text-slate-400">{site.is_active === false ? 'Inactive site' : 'Active site'}</div></td><td className="px-5 py-4 text-slate-600">{site.location || '—'}</td><td className="px-5 py-4">{clerk ? <><div className="font-medium">{nameOf(clerk)}</div><div className="text-xs text-slate-500">{clerk.email}</div></> : <span className="text-amber-600 text-xs font-bold">Unassigned</span>}</td><td className="px-5 py-4 text-slate-600">{assignment?.assigned_at ? new Date(assignment.assigned_at).toLocaleDateString() : '—'}</td><td className="px-5 py-4 text-right">{assignment && <button disabled={busySiteId === site.id} onClick={() => unassign(site)} className="inline-flex items-center gap-1.5 rounded-lg border border-rose-200 px-3 py-2 text-xs font-semibold text-rose-700 hover:bg-rose-50 disabled:opacity-50">{busySiteId === site.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Unlink className="h-3.5 w-3.5" />}Unassign</button>}</td></tr>; })}</tbody></table></div>
         </section>
       </main>
+
+      <ConfirmDialog
+        open={Boolean(confirmation)}
+        title={confirmation?.title}
+        message={confirmation?.message}
+        confirmLabel={confirmation?.confirmLabel}
+        tone={confirmation?.tone}
+        busy={confirmBusy}
+        onCancel={() => !confirmBusy && setConfirmation(null)}
+        onConfirm={confirmCurrentAction}
+      />
     </div>
   );
 }
