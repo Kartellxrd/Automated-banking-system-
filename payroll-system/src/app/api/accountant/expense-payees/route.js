@@ -11,12 +11,14 @@ export async function GET() {
 
   try {
     const db = createSupabaseAdminClient();
-    const [payeesResult, profilesResult, providersResult] = await Promise.all([
+    const [payeesResult, profilesResult, providersResult, requestsResult, sitesResult] = await Promise.all([
       db.from('expense_payees').select('*').order('display_name'),
       db.from('expense_payee_payout_profiles').select('id,payee_id,payout_provider_id,account_or_mobile_number,branch_code,is_primary,is_verified,verified_at,verified_by,created_at').order('created_at', { ascending: false }),
       db.from('payout_providers').select('id,code,name,payment_channel_id,is_active').eq('is_active', true).order('name'),
+      db.from('expense_requests').select('id,request_code,site_id,purpose,payment_type,vendor_name,operational_requester_name,requested_amount,accountant_recommended_amount,approved_amount,status,payee_id').in('status', ['submitted','pending_ceo','approved']).order('created_at', { ascending: false }),
+      db.from('sites').select('id,site_name').order('site_name'),
     ]);
-    for (const result of [payeesResult, profilesResult, providersResult]) if (result.error) throw result.error;
+    for (const result of [payeesResult, profilesResult, providersResult, requestsResult, sitesResult]) if (result.error) throw result.error;
 
     const profilesByPayee = new Map();
     for (const profile of profilesResult.data || []) {
@@ -24,6 +26,7 @@ export async function GET() {
       profilesByPayee.get(profile.payee_id).push(profile);
     }
     const providerMap = new Map((providersResult.data || []).map((row) => [row.id, row]));
+    const siteMap = new Map((sitesResult.data || []).map((row) => [row.id, row]));
     const data = (payeesResult.data || []).map((payee) => ({
       ...payee,
       payout_profiles: (profilesByPayee.get(payee.id) || []).map((profile) => ({
@@ -33,7 +36,15 @@ export async function GET() {
       })),
     }));
 
-    return NextResponse.json({ success: true, data, providers: providersResult.data || [] });
+    const requests = (requestsResult.data || []).map((row) => ({
+      ...row,
+      requested_amount: Number(row.requested_amount || 0),
+      accountant_recommended_amount: row.accountant_recommended_amount == null ? null : Number(row.accountant_recommended_amount),
+      approved_amount: row.approved_amount == null ? null : Number(row.approved_amount),
+      site: siteMap.get(row.site_id) || null,
+    }));
+
+    return NextResponse.json({ success: true, data, providers: providersResult.data || [], requests });
   } catch (error) {
     console.error('Expense payees GET error:', error);
     return NextResponse.json({ success: false, error: 'Failed to load expense payees.' }, { status: 500 });
@@ -105,5 +116,45 @@ export async function POST(request) {
   } catch (error) {
     console.error('Expense payees POST error:', error);
     return NextResponse.json({ success: false, error: 'Failed to create expense payee.' }, { status: 500 });
+  }
+}
+
+export async function PATCH(request) {
+  const access = await requireAccountant('expenses.payees.manage');
+  if (!access.ok) return NextResponse.json({ success: false, error: access.error }, { status: access.status });
+
+  try {
+    const body = await request.json();
+    const requestId = String(body.request_id || '').trim();
+    const payeeId = String(body.payee_id || '').trim();
+    if (!requestId || !payeeId) return NextResponse.json({ success: false, error: 'Expense request and payee are required.' }, { status: 400 });
+
+    const db = createSupabaseAdminClient();
+    const { data: payee, error: payeeError } = await db.from('expense_payees').select('id,display_name,is_active').eq('id', payeeId).maybeSingle();
+    if (payeeError) throw payeeError;
+    if (!payee?.is_active) return NextResponse.json({ success: false, error: 'Selected payee is inactive or missing.' }, { status: 400 });
+
+    const { data: payout, error: payoutError } = await db.from('expense_payee_payout_profiles').select('id').eq('payee_id', payeeId).eq('is_primary', true).eq('is_verified', true).not('verified_at', 'is', null).maybeSingle();
+    if (payoutError) throw payoutError;
+    if (!payout) return NextResponse.json({ success: false, error: 'Selected payee does not have a verified primary payout profile.' }, { status: 400 });
+
+    const { data: expense, error: expenseError } = await db.from('expense_requests').update({ payee_id: payeeId, updated_at: new Date().toISOString() }).eq('id', requestId).in('status', ['submitted','pending_ceo','approved']).select('id,request_code,status,payee_id').maybeSingle();
+    if (expenseError) throw expenseError;
+    if (!expense) return NextResponse.json({ success: false, error: 'Expense request cannot be assigned a payee in its current state.' }, { status: 400 });
+
+    await writeAuditLog(db, {
+      actorUserId: access.user.id,
+      action: 'ASSIGN_EXPENSE_PAYEE',
+      module: 'Expenses',
+      entityType: 'expense_requests',
+      entityId: requestId,
+      details: `Assigned ${payee.display_name} as payment recipient for ${expense.request_code}.`,
+      metadata: { payee_id: payeeId },
+    });
+
+    return NextResponse.json({ success: true, data: expense, message: `${payee.display_name} assigned as the verified payment recipient.` });
+  } catch (error) {
+    console.error('Expense payee assignment error:', error);
+    return NextResponse.json({ success: false, error: 'Failed to assign expense payee.' }, { status: 500 });
   }
 }
