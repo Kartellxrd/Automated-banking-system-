@@ -1,18 +1,22 @@
 'use client';
 
 import { useState } from 'react';
-import { AlertCircle, CheckCircle2, KeyRound, Loader2, X } from 'lucide-react';
+import { AlertCircle, CheckCircle2, Eye, EyeOff, KeyRound, Loader2, X } from 'lucide-react';
 
 export default function ChangePasswordButton({ compact = false, className = '' }) {
   const [open, setOpen] = useState(false);
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
+  const [showNewPassword, setShowNewPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [saving, setSaving] = useState(false);
   const [status, setStatus] = useState({ type: '', message: '' });
 
   function openModal() {
     setNewPassword('');
     setConfirmPassword('');
+    setShowNewPassword(false);
+    setShowConfirmPassword(false);
     setStatus({ type: '', message: '' });
     setOpen(true);
   }
@@ -38,9 +42,7 @@ export default function ChangePasswordButton({ compact = false, className = '' }
         body: JSON.stringify({ newPassword }),
       });
       const result = await response.json();
-      if (!response.ok || !result.success) {
-        throw new Error(result.error || 'Failed to update password.');
-      }
+      if (!response.ok || !result.success) throw new Error(result.error || 'Failed to update password.');
 
       setStatus({ type: 'success', message: 'Password updated successfully.' });
       setNewPassword('');
@@ -55,12 +57,7 @@ export default function ChangePasswordButton({ compact = false, className = '' }
 
   return (
     <>
-      <button
-        type="button"
-        onClick={openModal}
-        title="Change your password"
-        className={`${compact ? 'p-2.5' : 'px-3 py-2'} inline-flex items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white text-slate-700 hover:bg-slate-50 hover:border-slate-300 text-xs font-bold transition ${className}`}
-      >
+      <button type="button" onClick={openModal} title="Change your password" className={`${compact ? 'p-2.5' : 'px-3 py-2'} inline-flex items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white text-slate-700 hover:bg-slate-50 hover:border-slate-300 text-xs font-bold transition ${className}`}>
         <KeyRound className="w-4 h-4 text-indigo-600" />
         {!compact && <span className="hidden sm:inline">Change Password</span>}
       </button>
@@ -74,14 +71,7 @@ export default function ChangePasswordButton({ compact = false, className = '' }
                 <h3 className="mt-1 text-lg font-black text-slate-900">Change Password</h3>
                 <p className="mt-1 text-xs text-slate-500">Choose a new password with at least 10 characters.</p>
               </div>
-              <button
-                type="button"
-                disabled={saving}
-                onClick={() => setOpen(false)}
-                className="rounded-xl p-2 text-slate-400 hover:bg-slate-100 hover:text-slate-700 disabled:opacity-50"
-              >
-                <X className="h-5 w-5" />
-              </button>
+              <button type="button" disabled={saving} onClick={() => setOpen(false)} className="rounded-xl p-2 text-slate-400 hover:bg-slate-100 hover:text-slate-700 disabled:opacity-50"><X className="h-5 w-5" /></button>
             </div>
 
             {status.message && (
@@ -92,48 +82,12 @@ export default function ChangePasswordButton({ compact = false, className = '' }
             )}
 
             <form onSubmit={submit} className="mt-5 space-y-4">
-              <label className="block">
-                <span className="mb-1.5 block text-xs font-bold text-slate-700">New Password</span>
-                <input
-                  type="password"
-                  required
-                  minLength={10}
-                  autoComplete="new-password"
-                  value={newPassword}
-                  onChange={(event) => setNewPassword(event.target.value)}
-                  placeholder="Minimum 10 characters"
-                  className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3.5 py-2.5 text-sm outline-none focus:border-indigo-500 focus:bg-white"
-                />
-              </label>
-
-              <label className="block">
-                <span className="mb-1.5 block text-xs font-bold text-slate-700">Confirm New Password</span>
-                <input
-                  type="password"
-                  required
-                  minLength={10}
-                  autoComplete="new-password"
-                  value={confirmPassword}
-                  onChange={(event) => setConfirmPassword(event.target.value)}
-                  placeholder="Repeat the new password"
-                  className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3.5 py-2.5 text-sm outline-none focus:border-indigo-500 focus:bg-white"
-                />
-              </label>
+              <PasswordInput label="New Password" value={newPassword} onChange={setNewPassword} visible={showNewPassword} onToggle={() => setShowNewPassword((value) => !value)} placeholder="Minimum 10 characters" />
+              <PasswordInput label="Confirm New Password" value={confirmPassword} onChange={setConfirmPassword} visible={showConfirmPassword} onToggle={() => setShowConfirmPassword((value) => !value)} placeholder="Repeat the new password" />
 
               <div className="flex justify-end gap-2 pt-2">
-                <button
-                  type="button"
-                  disabled={saving}
-                  onClick={() => setOpen(false)}
-                  className="rounded-xl border border-slate-200 px-4 py-2.5 text-xs font-bold text-slate-700 disabled:opacity-50"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  disabled={saving}
-                  className="inline-flex items-center gap-2 rounded-xl bg-slate-900 px-4 py-2.5 text-xs font-black text-white hover:bg-slate-800 disabled:opacity-50"
-                >
+                <button type="button" disabled={saving} onClick={() => setOpen(false)} className="rounded-xl border border-slate-200 px-4 py-2.5 text-xs font-bold text-slate-700 disabled:opacity-50">Cancel</button>
+                <button type="submit" disabled={saving} className="inline-flex items-center gap-2 rounded-xl bg-slate-900 px-4 py-2.5 text-xs font-black text-white hover:bg-slate-800 disabled:opacity-50">
                   {saving && <Loader2 className="h-4 w-4 animate-spin" />}
                   {saving ? 'Updating...' : 'Save Password'}
                 </button>
@@ -143,5 +97,19 @@ export default function ChangePasswordButton({ compact = false, className = '' }
         </div>
       )}
     </>
+  );
+}
+
+function PasswordInput({ label, value, onChange, visible, onToggle, placeholder }) {
+  return (
+    <label className="block">
+      <span className="mb-1.5 block text-xs font-bold text-slate-700">{label}</span>
+      <div className="relative">
+        <input type={visible ? 'text' : 'password'} required minLength={10} autoComplete="new-password" value={value} onChange={(event) => onChange(event.target.value)} placeholder={placeholder} className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3.5 py-2.5 pr-11 text-sm outline-none focus:border-indigo-500 focus:bg-white" />
+        <button type="button" onClick={onToggle} aria-label={visible ? `Hide ${label}` : `Show ${label}`} className="absolute inset-y-0 right-0 flex items-center px-3.5 text-slate-400 hover:text-slate-700">
+          {visible ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+        </button>
+      </div>
+    </label>
   );
 }
