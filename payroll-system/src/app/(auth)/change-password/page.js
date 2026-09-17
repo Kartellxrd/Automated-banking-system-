@@ -54,6 +54,15 @@ function ChangePasswordContent() {
     setLoading(true);
 
     try {
+      const {
+        data: { user },
+        error: userError,
+      } = await supabase.auth.getUser();
+
+      if (userError || !user?.email) {
+        throw new Error('Your signed-in account could not be verified. Please sign in again.');
+      }
+
       const response = await fetch('/api/auth/change-password', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -66,15 +75,23 @@ function ChangePasswordContent() {
         throw new Error(result.error || 'Could not update password.');
       }
 
+      // Re-authenticate using the new credential before opening the dashboard.
+      // This proves the new password works and refreshes the browser session/cookies.
+      const { error: signInError } = await supabase.auth.signInWithPassword({
+        email: user.email,
+        password,
+      });
+
+      if (signInError) {
+        throw new Error('The password was updated, but the session could not be refreshed. Please sign in with your new password.');
+      }
+
       const target = result.redirect_to || '/dashboard';
       setMessage({ type: 'success', text: 'Password updated successfully. Opening your dashboard...' });
 
-      // Keep the authenticated session alive. The middleware will also enforce the
-      // user's role boundary, so a Site Clerk lands only on the Site Clerk dashboard,
-      // HR on HR, Accountant on Accountant, CEO on CEO, and Admin on Admin.
       setTimeout(() => {
         window.location.replace(target);
-      }, 700);
+      }, 600);
     } catch (error) {
       setMessage({ type: 'error', text: error.message || 'Could not update password.' });
       setLoading(false);
@@ -89,7 +106,7 @@ function ChangePasswordContent() {
             <KeyRound className="h-6 w-6" />
           </div>
           <h1 className="text-2xl font-bold text-white">Set a new password</h1>
-          <p className="mt-2 text-sm text-slate-400">Choose a new password for your Periscope system account.</p>
+          <p className="mt-2 text-sm text-slate-400">Replace the temporary password, then continue directly to your assigned portal.</p>
         </div>
 
         {message.text && (
