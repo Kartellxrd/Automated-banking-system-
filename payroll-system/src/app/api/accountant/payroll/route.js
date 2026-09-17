@@ -18,7 +18,7 @@ export async function GET() {
         .order('shift_date', { ascending: false }),
       db.from('payroll_batch_rosters').select('roster_id'),
       db.from('payroll_batches')
-        .select('id, batch_code, pay_period_id, status, total_employees, total_regular_hours, total_overtime_hours, gross_total, deductions_total, net_total, submitted_at, ceo_rejection_reason, created_at, updated_at')
+        .select('id, batch_code, pay_period_id, status, scheduled_payment_date, total_employees, total_regular_hours, total_overtime_hours, gross_total, deductions_total, net_total, submitted_at, ceo_rejection_reason, created_at, updated_at')
         .order('created_at', { ascending: false })
         .limit(100),
     ]);
@@ -102,12 +102,17 @@ export async function POST(request) {
   try {
     const body = await request.json();
     const rosterIds = Array.isArray(body.roster_ids) ? [...new Set(body.roster_ids.map(String).filter(Boolean))] : [];
+    const scheduledPaymentDate = String(body.scheduled_payment_date || '').trim();
+
     if (!rosterIds.length) {
       return NextResponse.json({ success: false, error: 'Select at least one HR-approved roster.' }, { status: 400 });
     }
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(scheduledPaymentDate)) {
+      return NextResponse.json({ success: false, error: 'Select the intended payroll payment date.' }, { status: 400 });
+    }
 
     const db = createSupabaseAdminClient();
-    const { data: batch, error } = await db.rpc('accountant_prepare_payroll_batch', {
+    const { data: preparedBatch, error } = await db.rpc('accountant_prepare_payroll_batch', {
       p_accountant_id: access.user.id,
       p_roster_ids: rosterIds,
     });
@@ -117,14 +122,29 @@ export async function POST(request) {
       return NextResponse.json({ success: false, error: error.message || 'Could not prepare payroll batch.' }, { status: conflict ? 409 : 400 });
     }
 
+    const { data: batch, error: scheduleError } = await db
+      .from('payroll_batches')
+      .update({ scheduled_payment_date: scheduledPaymentDate, updated_at: new Date().toISOString() })
+      .eq('id', preparedBatch.id)
+      .select('*')
+      .single();
+
+    if (scheduleError) throw scheduleError;
+
     await writeAuditLog(db, {
       actorUserId: access.user.id,
       action: 'PREPARE_PAYROLL_BATCH',
       module: 'Payroll & Finance',
       entityType: 'payroll_batches',
       entityId: batch.id,
-      details: `Prepared payroll batch ${batch.batch_code}.`,
-      metadata: { roster_ids: rosterIds, total_employees: batch.total_employees, gross_total: batch.gross_total, net_total: batch.net_total },
+      details: `Prepared payroll batch ${batch.batch_code} for payment on ${scheduledPaymentDate}.`,
+      metadata: {
+        roster_ids: rosterIds,
+        scheduled_payment_date: scheduledPaymentDate,
+        total_employees: batch.total_employees,
+        gross_total: batch.gross_total,
+        net_total: batch.net_total,
+      },
     });
 
     return NextResponse.json({ success: true, data: batch }, { status: 201 });
