@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { AlertTriangle, CheckCircle2, FileCheck2, Loader2, RefreshCw, Send, Users } from 'lucide-react';
+import { AlertTriangle, CalendarDays, CheckCircle2, FileCheck2, Loader2, RefreshCw, Users } from 'lucide-react';
 import AccNavbar from '@/components/accountant/AccNavbar';
 import AccSideNav from '@/components/accountant/AccSideNav';
 
@@ -10,12 +10,17 @@ function money(value) {
   return `P${Number(value || 0).toLocaleString('en-BW', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
+function dateLabel(value) {
+  if (!value) return 'Not scheduled';
+  return new Date(`${value}T12:00:00`).toLocaleDateString('en-BW', { day: '2-digit', month: 'short', year: 'numeric' });
+}
+
 const STATUS = {
   draft: ['Draft', 'bg-slate-100 text-slate-700'],
   ready_for_ceo: ['Waiting for CEO', 'bg-indigo-50 text-indigo-700'],
   rejected_by_ceo: ['Returned by CEO', 'bg-rose-50 text-rose-700'],
   approved_by_ceo: ['CEO Approved', 'bg-emerald-50 text-emerald-700'],
-  executing: ['Payment Running', 'bg-amber-50 text-amber-700'],
+  executing: ['Payment Processing', 'bg-amber-50 text-amber-700'],
   paid: ['Paid', 'bg-emerald-50 text-emerald-700'],
   partial_failed: ['Partial Failure', 'bg-rose-50 text-rose-700'],
   failed: ['Failed', 'bg-rose-50 text-rose-700'],
@@ -26,6 +31,7 @@ export default function PayrollPreparationPage() {
   const [rosters, setRosters] = useState([]);
   const [batches, setBatches] = useState([]);
   const [selected, setSelected] = useState([]);
+  const [scheduledPaymentDate, setScheduledPaymentDate] = useState('');
   const [loading, setLoading] = useState(true);
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState('');
@@ -65,14 +71,14 @@ export default function PayrollPreparationPage() {
   }
 
   async function prepareBatch() {
-    if (!selected.length) return;
+    if (!selected.length || !scheduledPaymentDate) return;
     setCreating(true);
     setError('');
     try {
       const response = await fetch('/api/accountant/payroll', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ roster_ids: selected }),
+        body: JSON.stringify({ roster_ids: selected, scheduled_payment_date: scheduledPaymentDate }),
       });
       const result = await response.json();
       if (!response.ok || !result.success) throw new Error(result.error || 'Could not prepare payroll batch.');
@@ -88,11 +94,24 @@ export default function PayrollPreparationPage() {
     <div className="min-h-screen bg-slate-100 flex flex-col lg:flex-row text-slate-900">
       <AccSideNav />
       <div className="flex-1 min-w-0">
-        <AccNavbar title="Payroll Preparation" subtitle="Select HR-approved rosters, calculate payroll and prepare one CEO batch" />
+        <AccNavbar title="Payroll Preparation" subtitle="Build payroll from HR-approved attendance and set the intended pay date" />
         <main className="p-4 sm:p-6 lg:p-8 max-w-7xl mx-auto space-y-6">
-          <section className="rounded-3xl bg-slate-950 p-6 sm:p-8 text-white flex flex-col lg:flex-row lg:items-center justify-between gap-5">
-            <div><p className="text-[11px] uppercase tracking-[0.18em] text-indigo-300 font-bold">Approved Attendance Only</p><h1 className="text-2xl sm:text-3xl font-black mt-1">Build Payroll Batch</h1><p className="text-sm text-slate-300 mt-2 max-w-2xl">Each selected roster can enter payroll only once. Pay is calculated from its HR-approved shift entries and the hourly-rate snapshot captured when attendance was recorded.</p></div>
-            <button onClick={prepareBatch} disabled={!selected.length || creating} className="rounded-xl bg-indigo-600 px-5 py-3 text-sm font-bold disabled:opacity-40 inline-flex items-center justify-center gap-2 shrink-0">{creating ? <Loader2 className="w-4 h-4 animate-spin" /> : <FileCheck2 className="w-4 h-4" />}Prepare {selected.length || ''} Batch</button>
+          <section className="rounded-3xl bg-slate-950 p-6 sm:p-8 text-white flex flex-col lg:flex-row lg:items-end justify-between gap-5">
+            <div>
+              <p className="text-[11px] uppercase tracking-[0.18em] text-indigo-300 font-bold">Approved Attendance Only</p>
+              <h1 className="text-2xl sm:text-3xl font-black mt-1">Build Payroll Batch</h1>
+              <p className="text-sm text-slate-300 mt-2 max-w-2xl">Selected rosters enter payroll once. Calculations use the HR-approved hours and captured rate snapshots.</p>
+            </div>
+            <div className="flex flex-col sm:flex-row gap-3 sm:items-end shrink-0">
+              <label className="block">
+                <span className="text-[11px] uppercase tracking-wider font-bold text-slate-300">Scheduled payday *</span>
+                <div className="relative mt-1">
+                  <CalendarDays className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+                  <input type="date" required value={scheduledPaymentDate} onChange={(e) => setScheduledPaymentDate(e.target.value)} className="rounded-xl bg-white text-slate-900 pl-10 pr-3 py-3 text-sm font-semibold border border-slate-700" />
+                </div>
+              </label>
+              <button onClick={prepareBatch} disabled={!selected.length || !scheduledPaymentDate || creating} className="rounded-xl bg-indigo-600 px-5 py-3 text-sm font-bold disabled:opacity-40 inline-flex items-center justify-center gap-2">{creating ? <Loader2 className="w-4 h-4 animate-spin" /> : <FileCheck2 className="w-4 h-4" />}Prepare {selected.length || ''} Batch</button>
+            </div>
           </section>
 
           {error && <div className="rounded-2xl border border-rose-200 bg-rose-50 p-4 text-sm font-semibold text-rose-700 flex items-center gap-2"><AlertTriangle className="w-4 h-4" />{error}</div>}
@@ -109,10 +128,8 @@ export default function PayrollPreparationPage() {
 
           <section className="rounded-3xl border border-slate-200 bg-white shadow-sm overflow-hidden">
             <div className="p-5 border-b border-slate-100"><h2 className="font-black">Payroll Batches</h2><p className="text-xs text-slate-500 mt-1">Open a batch to inspect employee calculations and payout readiness.</p></div>
-            {!batches.length ? <div className="p-12 text-center text-sm text-slate-500">No new payroll batches yet.</div> : <div className="divide-y divide-slate-100">{batches.map((batch) => { const status = STATUS[batch.status] || [batch.status, 'bg-slate-100']; return <button key={batch.id} onClick={() => router.push(`/dashboard/accountant/staging/${batch.id}`)} className="w-full p-4 text-left flex items-center justify-between gap-4 hover:bg-slate-50"><div className="flex items-center gap-3"><div className="rounded-xl bg-indigo-50 p-2.5 text-indigo-600"><Users className="w-4 h-4" /></div><div><div className="font-bold text-sm">{batch.batch_code}</div><div className="text-xs text-slate-500">{batch.pay_period?.period_name || 'Pay period'} • {batch.total_employees} employees</div></div></div><div className="text-right"><div className="font-black">{money(batch.net_total)}</div><span className={`rounded-full px-2.5 py-1 text-[10px] font-bold ${status[1]}`}>{status[0]}</span></div></button>; })}</div>}
+            {!batches.length ? <div className="p-12 text-center text-sm text-slate-500">No payroll batches yet.</div> : <div className="divide-y divide-slate-100">{batches.map((batch) => { const status = STATUS[batch.status] || [batch.status, 'bg-slate-100']; return <button key={batch.id} onClick={() => router.push(`/dashboard/accountant/staging/${batch.id}`)} className="w-full p-4 text-left flex items-center justify-between gap-4 hover:bg-slate-50"><div className="flex items-center gap-3"><div className="rounded-xl bg-indigo-50 p-2.5 text-indigo-600"><Users className="w-4 h-4" /></div><div><div className="font-bold text-sm">{batch.batch_code}</div><div className="text-xs text-slate-500">{batch.pay_period?.period_name || 'Pay period'} • {batch.total_employees} employees</div><div className="text-[11px] text-indigo-600 font-bold mt-1">Pay date: {dateLabel(batch.scheduled_payment_date)}</div></div></div><div className="text-right"><div className="font-black">{money(batch.net_total)}</div><span className={`rounded-full px-2.5 py-1 text-[10px] font-bold ${status[1]}`}>{status[0]}</span></div></button>; })}</div>}
           </section>
-
-          <section className="rounded-3xl border border-amber-100 bg-amber-50 p-4 text-xs text-amber-900 flex items-start gap-2"><Send className="w-4 h-4 mt-0.5" /><p><strong>CEO handoff:</strong> Accountant can only submit a batch once every employee with pay due has verified payout details from HR. Missing bank/mobile-money profiles block submission instead of letting bad payment instructions through.</p></section>
         </main>
       </div>
     </div>
