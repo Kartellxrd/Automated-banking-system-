@@ -8,7 +8,7 @@ export const dynamic = 'force-dynamic';
 async function loadBatch(db, id) {
   const { data: batch, error: batchError } = await db
     .from('payroll_batches')
-    .select('id,batch_code,pay_period_id,status,created_by,submitted_by,submitted_at,ceo_reviewed_by,ceo_reviewed_at,ceo_rejection_reason,total_employees,total_regular_hours,total_overtime_hours,gross_total,deductions_total,net_total,execution_started_at,execution_completed_at,created_at,updated_at')
+    .select('id,batch_code,pay_period_id,status,scheduled_payment_date,created_by,submitted_by,submitted_at,ceo_reviewed_by,ceo_reviewed_at,ceo_rejection_reason,total_employees,total_regular_hours,total_overtime_hours,gross_total,deductions_total,net_total,execution_started_at,execution_completed_at,created_at,updated_at')
     .eq('id', id)
     .maybeSingle();
   if (batchError) throw batchError;
@@ -162,6 +162,7 @@ export async function PATCH(request, context) {
       details: `${action === 'approve' ? 'Approved' : 'Rejected'} payroll batch ${data.batch_code}.`,
       metadata: {
         status: data.status,
+        scheduled_payment_date: data.scheduled_payment_date || null,
         net_total: Number(data.net_total || 0),
         reason: body.reason || null,
       },
