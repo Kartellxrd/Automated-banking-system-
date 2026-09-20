@@ -1,11 +1,17 @@
 'use client';
+
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Activity, AlertTriangle, CheckCircle, ChevronLeft, ChevronRight, Download, RefreshCw, Search, ShieldAlert, XCircle } from 'lucide-react';
+
 import AdminNavbar from '@/components/admin/AdminNavbar';
 import AdminSideNav from '@/components/admin/AdminSideNav';
+
 const ROLE_LABELS={admin:'System Admin',site_clerk:'Site Clerk',hr:'HR Manager',accountant:'Accountant',ceo:'CEO / Executive'};
+
 const csvCell=(v)=>`"${String(v??'').replaceAll('"','""')}"`;
+
 export default function SecurityAuditLogsPage(){
+    
  const[logs,setLogs]=useState([]),[loading,setLoading]=useState(true),[error,setError]=useState(''),[search,setSearch]=useState(''),[status,setStatus]=useState('ALL'),[module,setModule]=useState('ALL'),[currentPage,setCurrentPage]=useState(1); const perPage=10;
  const load=useCallback(async()=>{setLoading(true);setError('');try{const r=await fetch('/api/admin/audit-logs?limit=500',{cache:'no-store'});const j=await r.json();if(!r.ok||!j.success)throw new Error(j.error||'Could not load audit logs.');setLogs(j.data||[]);}catch(e){setError(e.message)}finally{setLoading(false)}},[]);
  useEffect(()=>{load()},[load]);
