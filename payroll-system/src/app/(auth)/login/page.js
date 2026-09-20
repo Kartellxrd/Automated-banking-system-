@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { supabase } from '@/lib/supabase';
 import {
   Mail,
@@ -22,6 +22,14 @@ export default function LoginPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [successMsg, setSuccessMsg] = useState('');
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('error') === 'session_timeout') {
+      setError('You were signed out after 15 minutes of inactivity. Sign in again to continue.');
+      window.history.replaceState({}, '', '/login');
+    }
+  }, []);
 
   const formatRoleLabel = (roleStr) => {
     switch (roleStr) {
