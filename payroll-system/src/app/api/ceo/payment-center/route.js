@@ -6,18 +6,32 @@ import { writeAuditLog } from '@/lib/audit/writeAuditLog';
 export const dynamic = 'force-dynamic';
 const num = (value) => Number(value || 0);
 
+function paymentEnvironment() {
+  const mode = String(process.env.PAYMENTS_MODE || 'test').toLowerCase() === 'production' ? 'production' : 'test';
+  return {
+    mode,
+    live_payments_enabled: mode === 'production',
+    label: mode === 'production' ? 'PRODUCTION' : 'TEST',
+  };
+}
+
 async function loadPaymentCenter(db) {
   const [payrollResult, expensesResult, runsResult, accountsResult] = await Promise.all([
     db.from('payroll_batches').select('id,batch_code,pay_period_id,status,scheduled_payment_date,total_employees,net_total,ceo_reviewed_at,submitted_at').eq('status', 'approved_by_ceo').order('scheduled_payment_date', { ascending: true, nullsFirst: false }),
     db.from('expense_requests').select('id,request_code,site_id,category_id,status,purpose,payment_type,vendor_name,operational_requester_name,approved_amount,approved_at,payee_id').eq('status', 'approved').order('approved_at'),
     db.from('payment_runs').select('id,run_code,run_type,payroll_batch_id,status,execution_mode,total_items,total_amount,prepared_at,authorized_by,authorized_at,source_payment_account_id,execution_started_at,execution_completed_at,created_at').neq('status','cancelled').order('created_at',{ascending:false}).limit(80),
-    db.from('company_payment_accounts').select('id,account_name,institution_name,account_identifier_label,is_active'),
+    db.from('company_payment_accounts').select('id,account_name,institution_name,account_type,account_identifier_label,currency,is_active,created_at').order('is_active',{ascending:false}).order('created_at',{ascending:true}),
   ]);
   for (const r of [payrollResult, expensesResult, runsResult, accountsResult]) if (r.error) throw r.error;
 
   const payrollBatches = payrollResult.data || [];
   const expensesRaw = expensesResult.data || [];
   const runs = runsResult.data || [];
+  const accounts = accountsResult.data || [];
+  const activeAccounts = accounts.filter((row) => row.is_active !== false);
+  const paymentSourceReady = activeAccounts.length > 0;
+  const environment = paymentEnvironment();
+
   const batchIds = [...new Set([...payrollBatches.map((r)=>r.id), ...runs.map((r)=>r.payroll_batch_id).filter(Boolean)])];
   const periodIds = [...new Set(payrollBatches.map((r)=>r.pay_period_id).filter(Boolean))];
   const siteIds = [...new Set(expensesRaw.map((r)=>r.site_id).filter(Boolean))];
@@ -45,7 +59,7 @@ async function loadPaymentCenter(db) {
   const payeeMap = new Map((payeesResult.data||[]).map((r)=>[r.id,r]));
   const providerMap = new Map((providersResult.data||[]).map((r)=>[r.id,r]));
   const payoutMap = new Map((payoutProfilesResult.data||[]).map((r)=>[r.payee_id,r]));
-  const accountMap = new Map((accountsResult.data||[]).map((r)=>[r.id,r]));
+  const accountMap = new Map(accounts.map((r)=>[r.id,r]));
 
   const entriesByBatch = new Map();
   for (const entry of entriesResult.data||[]) {
@@ -73,7 +87,12 @@ async function loadPaymentCenter(db) {
   const payroll = payrollBatches.map((batch)=>{
     const entries=entriesByBatch.get(batch.id)||[];
     const payable=entries.filter((e)=>e.net_pay>0);
-    const blockers=payable.filter((e)=>!(e.payout_provider_id&&e.payout_account_snapshot&&e.payout_verified_at_snapshot));
+    const recipientBlockers=payable.filter((e)=>!(e.payout_provider_id&&e.payout_account_snapshot&&e.payout_verified_at_snapshot));
+    const releaseBlockers=[];
+    if (!batch.scheduled_payment_date) releaseBlockers.push('Payroll has no scheduled payment date.');
+    if (recipientBlockers.length) releaseBlockers.push(`${recipientBlockers.length} employee payout profile(s) are missing or unverified.`);
+    if (!paymentSourceReady) releaseBlockers.push('No active company payment source is configured by Finance.');
+
     const breakdown=new Map();
     for (const e of payable) {
       const key=e.payout_provider_name_snapshot||'Missing payout provider';
@@ -88,8 +107,9 @@ async function loadPaymentCenter(db) {
       net_total:num(batch.net_total),
       pay_period:periodMap.get(batch.pay_period_id)||null,
       payable_recipients:payable.length,
-      payment_blockers:blockers.length,
-      payment_ready:payable.length>0 && blockers.length===0 && Boolean(batch.scheduled_payment_date),
+      payment_blockers:releaseBlockers.length,
+      release_blockers:releaseBlockers,
+      payment_ready:payable.length>0 && releaseBlockers.length===0,
       payment_run:run,
       channel_breakdown:[...breakdown.values()].map((x)=>({...x,amount:Number(x.amount.toFixed(2))})),
     };
@@ -99,8 +119,12 @@ async function loadPaymentCenter(db) {
     const payee=row.payee_id?payeeMap.get(row.payee_id)||null:null;
     const profile=payee?payoutMap.get(payee.id)||null:null;
     const provider=profile?providerMap.get(profile.payout_provider_id)||null:null;
-    const ready=Boolean(payee?.is_active && profile?.is_verified && profile?.verified_at && provider?.is_active);
+    const payeeReady=Boolean(payee?.is_active && profile?.is_verified && profile?.verified_at && provider?.is_active);
+    const ready=payeeReady && paymentSourceReady;
     const masked=profile?.account_or_mobile_number ? (profile.account_or_mobile_number.length<=4?profile.account_or_mobile_number:`${'*'.repeat(profile.account_or_mobile_number.length-4)}${profile.account_or_mobile_number.slice(-4)}`) : null;
+    const blockers=[];
+    if (!payeeReady) blockers.push(row.payee_id?'Assigned payee does not have a verified active payout profile.':'Accountant must assign a verified expense payee before payment.');
+    if (!paymentSourceReady) blockers.push('No active company payment source is configured by Finance.');
     return {
       ...row,
       approved_amount:num(row.approved_amount),
@@ -109,7 +133,7 @@ async function loadPaymentCenter(db) {
       payee:payee?{...payee,payout:profile?{...profile,provider,masked_destination:masked}:null}:null,
       payment_ready:ready,
       payment_run:expenseRunByRequest.get(row.id)||null,
-      payment_blockers:ready?[]:[row.payee_id?'Assigned payee does not have a verified active payout profile.':'Accountant must assign a verified expense payee before payment.'],
+      payment_blockers:blockers,
     };
   });
 
@@ -131,6 +155,19 @@ async function loadPaymentCenter(db) {
     payroll,
     expenses,
     payment_runs: paymentRuns,
+    payment_configuration: {
+      environment,
+      source_ready: paymentSourceReady,
+      active_source_count: activeAccounts.length,
+      active_sources: activeAccounts.map((row) => ({
+        id: row.id,
+        account_name: row.account_name,
+        institution_name: row.institution_name,
+        account_type: row.account_type,
+        account_identifier_label: row.account_identifier_label,
+        currency: row.currency,
+      })),
+    },
     summary:{
       payroll_batches:payroll.length,
       payroll_recipients:payroll.reduce((s,r)=>s+r.payable_recipients,0),
@@ -163,6 +200,12 @@ export async function POST(request) {
     const action=String(body.action||'').trim().toLowerCase();
     const db=createSupabaseAdminClient();
 
+    const { data: activeSource, error: sourceError } = await db.from('company_payment_accounts').select('id').eq('is_active', true).limit(1).maybeSingle();
+    if (sourceError) throw sourceError;
+    if (!activeSource && ['prepare_payroll','prepare_expense'].includes(action)) {
+      return NextResponse.json({success:false,error:'Finance must configure and activate a company payment source before the CEO can release payments.'},{status:409});
+    }
+
     if(action==='prepare_payroll'){
       const access=await requireCEO('payroll.execute');
       if(!access.ok) return NextResponse.json({success:false,error:access.error},{status:access.status});
@@ -175,7 +218,7 @@ export async function POST(request) {
 
       const {data:run,error}=await db.rpc('ceo_prepare_payroll_payment_run',{p_ceo_id:access.user.id,p_batch_id:batchId});
       if(error) return NextResponse.json({success:false,error:error.message},{status:400});
-      await writeAuditLog(db,{actorUserId:access.user.id,action:'RELEASE_PAYROLL_PAYMENT_RUN',module:'Payments',entityType:'payment_run',entityId:run.id,details:`CEO released payroll payment run ${run.run_code}.`,metadata:{payroll_batch_id:batchId,scheduled_payment_date:batch.scheduled_payment_date,total_items:run.total_items,total_amount:num(run.total_amount)}});
+      await writeAuditLog(db,{actorUserId:access.user.id,action:'RELEASE_PAYROLL_PAYMENT_RUN',module:'Payments',entityType:'payment_run',entityId:run.id,details:`CEO released payroll payment run ${run.run_code}.`,metadata:{payroll_batch_id:batchId,scheduled_payment_date:batch.scheduled_payment_date,total_items:run.total_items,total_amount:num(run.total_amount),payment_mode:paymentEnvironment().mode}});
       return NextResponse.json({success:true,data:run,message:'Payroll released for payment. Finance can now submit the locked instructions to the approved payment channel.'},{status:201});
     }
 
@@ -186,7 +229,7 @@ export async function POST(request) {
       if(!requestId) return NextResponse.json({success:false,error:'Expense request ID is required.'},{status:400});
       const {data:run,error}=await db.rpc('ceo_prepare_expense_payment_run',{p_ceo_id:access.user.id,p_request_id:requestId});
       if(error) return NextResponse.json({success:false,error:error.message},{status:400});
-      await writeAuditLog(db,{actorUserId:access.user.id,action:'RELEASE_EXPENSE_PAYMENT_RUN',module:'Payments',entityType:'payment_run',entityId:run.id,details:`CEO released expense payment run ${run.run_code}.`,metadata:{expense_request_id:requestId,total_amount:num(run.total_amount)}});
+      await writeAuditLog(db,{actorUserId:access.user.id,action:'RELEASE_EXPENSE_PAYMENT_RUN',module:'Payments',entityType:'payment_run',entityId:run.id,details:`CEO released expense payment run ${run.run_code}.`,metadata:{expense_request_id:requestId,total_amount:num(run.total_amount),payment_mode:paymentEnvironment().mode}});
       return NextResponse.json({success:true,data:run,message:'Expense released for payment. Finance can now submit the locked instruction from the company payment account.'},{status:201});
     }
 
