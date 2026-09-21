@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
-import { Banknote, Building2, Calculator, ChevronRight, CreditCard, FileCheck2, LogOut, Menu, Receipt, UserCheck, X } from 'lucide-react';
+import { Banknote, Building2, Calculator, ChevronRight, CreditCard, FileCheck2, Landmark, LogOut, Menu, Receipt, UserCheck, X } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 
 export default function AccSideNav() {
@@ -14,6 +14,7 @@ export default function AccSideNav() {
   const navItems = [
     { name: 'Dashboard', href: '/dashboard/accountant', icon: Calculator, exact: true },
     { name: 'Payroll Preparation', href: '/dashboard/accountant/staging', icon: FileCheck2 },
+    { name: 'Payment Setup', href: '/dashboard/accountant/payment-setup', icon: Landmark },
     { name: 'Payment Processing', href: '/dashboard/accountant/payments', icon: CreditCard },
     { name: 'Expense Requests', href: '/dashboard/accountant/expense-requests', icon: Banknote, exact: true },
     { name: 'Expense Payees', href: '/dashboard/accountant/expense-payees', icon: UserCheck },
