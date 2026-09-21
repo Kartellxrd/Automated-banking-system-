@@ -10,6 +10,16 @@ function num(value) {
   return Number(value || 0);
 }
 
+function paymentEnvironment() {
+  const mode = String(process.env.PAYMENTS_MODE || 'test').toLowerCase() === 'production' ? 'production' : 'test';
+  return {
+    mode,
+    label: mode === 'production' ? 'PRODUCTION' : 'TEST',
+    live_payments_enabled: mode === 'production',
+    settlement_recording_enabled: mode === 'production',
+  };
+}
+
 export async function GET() {
   const access = await requireAccountant('payments.view');
   if (!access.ok) return NextResponse.json({ success: false, error: access.error }, { status: access.status });
@@ -105,6 +115,8 @@ export async function GET() {
       pending_amount: data.filter((row) => ['prepared','executing','partial_failed','failed'].includes(row.status)).reduce((sum, row) => sum + row.total_amount, 0),
     };
 
+    const environment = paymentEnvironment();
+
     return NextResponse.json({
       success: true,
       data,
@@ -112,8 +124,12 @@ export async function GET() {
       methods: methodsResult.data || [],
       summary,
       workflow: {
-        mode: 'manual_execution',
-        message: 'CEO-authorized runs are executed by the Accountant using the company\'s real FNB bulk or manual mobile-money process. No item is marked paid without a recorded real reference.',
+        mode: environment.mode === 'production' ? 'bank_execution' : 'test_processing',
+        environment,
+        settlement_recording_enabled: environment.settlement_recording_enabled,
+        message: environment.mode === 'production'
+          ? 'CEO-authorized runs are processed by Finance and only marked paid after a real bank or mobile-money settlement reference is recorded.'
+          : 'TEST mode allows Finance to prepare and export released runs without recording fake settlement results against real payroll.',
       },
     });
   } catch (error) {
@@ -195,11 +211,11 @@ export async function POST(request) {
         module: 'Payments',
         entityType: 'payment_run',
         entityId: runId,
-        details: `Started manual execution of payment run ${data.run_code}.`,
-        metadata: { source_payment_account_id: sourceAccountId, execution_mode: 'manual_export' },
+        details: `Started payment processing for ${data.run_code}.`,
+        metadata: { source_payment_account_id: sourceAccountId, execution_mode: 'manual_export', payment_mode: paymentEnvironment().mode },
       });
 
-      return NextResponse.json({ success: true, data, message: `${data.run_code} is now in execution.` });
+      return NextResponse.json({ success: true, data, message: `${data.run_code} is ready for payment instruction export.` });
     } catch (error) {
       console.error('Start payment run error:', error);
       return NextResponse.json({ success: false, error: 'Failed to start payment run.' }, { status: 500 });
@@ -247,6 +263,13 @@ export async function PATCH(request) {
   if (!access.ok) return NextResponse.json({ success: false, error: access.error }, { status: access.status });
 
   if (action === 'submitted' || action === 'paid' || action === 'failed' || action === 'retry') {
+    if (!paymentEnvironment().settlement_recording_enabled) {
+      return NextResponse.json({
+        success: false,
+        error: 'Settlement recording is disabled while PAYMENTS_MODE is TEST. Switch to production only after the real FNB process is verified.',
+      }, { status: 409 });
+    }
+
     const itemId = String(body.item_id || '').trim();
     const methodId = body.execution_method_id ? String(body.execution_method_id).trim() : null;
     const reference = body.reference == null ? null : String(body.reference).trim();
